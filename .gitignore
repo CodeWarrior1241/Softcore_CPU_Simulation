@@ -34,3 +34,15 @@ sw/image_gen/image_gen
 # generated documentation stuff
 /docs/doxygen_build/
 /docs/public/
+
+# Questa/ModelSim simulation artifacts
+sim/questa/work/
+sim/questa/neorv32/
+sim/questa/*.wlf
+sim/questa/transcript
+sim/questa/vsim.wlf
+sim/questa/modelsim.ini
+*.mti
+*.mpf
+*.cr.mti
+*.mpf.bak
