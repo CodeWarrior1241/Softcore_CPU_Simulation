@@ -5,6 +5,7 @@ build/
 *.mem
 *.mif
 *.o
+*.obj
 *.elf
 *.asm
 *.out
