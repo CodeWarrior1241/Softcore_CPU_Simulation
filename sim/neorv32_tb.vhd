@@ -391,7 +391,7 @@ begin
   generic map (
     NAME => "tb.uart0_rx",
     FCLK => real(CLOCK_FREQUENCY),
-    BAUD => real(19200)
+    BAUD => real(115200)
   )
   port map (
     clk => clk_gen,
@@ -402,7 +402,7 @@ begin
   generic map (
     NAME => "tb.uart1_rx",
     FCLK => real(CLOCK_FREQUENCY),
-    BAUD => real(19200)
+    BAUD => real(115200)
   )
   port map (
     clk => clk_gen,
