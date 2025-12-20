@@ -1,0 +1,56 @@
+[*]
+[*] GTKWave Analyzer v3.3.125 (w)1999-2025 BSI
+[*] Sat Dec 20 06:05:48 2025
+[*]
+[dumpfile] "C:\Work\Sandbox\Softcore_CPU_Simulation\sim\NVC\neorv32_20ms.fst"
+[dumpfile_mtime] "Sat Dec 20 05:52:32 2025"
+[dumpfile_size] 3964207
+[savefile] "C:\Work\Sandbox\Softcore_CPU_Simulation\sim\NVC\neorv32_debug.gtkw"
+[timestart] 0
+[size] 3182 1080
+[pos] 3784 -22
+*-40.521721 6494755000000 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] neorv32_tb.
+[treeopen] neorv32_tb.neorv32_top_inst.
+[sst_width] 310
+[signals_width] 310
+[sst_expanded] 1
+[sst_vpaned_height] 400
+@800200
+-Testbench Clocks & Reset
+@28
+neorv32_tb.clk_gen
+neorv32_tb.rst_gen
+neorv32_tb.neorv32_top_inst.rstn_sys
+neorv32_tb.neorv32_top_inst.rstn_ext
+@1001200
+-Testbench Clocks & Reset
+@800200
+-GPIO
+@22
+neorv32_tb.neorv32_top_inst.gpio_o[31:0]
+@1001200
+-GPIO
+@800200
+-UART0 (Primary)
+@28
+neorv32_tb.neorv32_top_inst.uart0_txd_o
+neorv32_tb.neorv32_top_inst.uart0_rtsn_o
+neorv32_tb.sim_rx_uart0.busy
+@22
+neorv32_tb.sim_rx_uart0.sreg[8:0]
+@1001200
+-UART0 (Primary)
+@800200
+-XBUS (External Bus)
+@28
+neorv32_tb.xbus_interconnect.dev_0_req_o.stb
+neorv32_tb.xbus_interconnect.dev_0_req_o.we
+@22
+neorv32_tb.xbus_interconnect.dev_0_req_o.addr[31:0]
+neorv32_tb.xbus_interconnect.dev_0_req_o.data[31:0]
+neorv32_tb.xbus_interconnect.acc_en[7:0]
+@1001200
+-XBUS (External Bus)
+[pattern_trace] 1
+[pattern_trace] 0
