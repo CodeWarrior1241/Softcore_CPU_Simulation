@@ -58,6 +58,47 @@ sudo apt install gtkwave
 brew install gtkwave
 ```
 
+## Changing the Application Program
+
+The simulation runs whatever program is compiled into `rtl/core/neorv32_application_image.vhd`. To simulate a different program:
+
+### Step 1: Build the Program
+
+Navigate to the program directory and build it:
+
+```bash
+cd sw/example/hello_world
+make clean_all exe
+```
+
+This generates `neorv32_application_image.vhd` in `rtl/core/`.
+
+### Step 2: Clean and Re-run Simulation
+
+The simulator must re-analyze the updated VHDL file:
+
+```bash
+cd sim/GHDL
+./run_sim.sh --clean
+./run_sim.sh --time 10ms
+```
+
+### Available Example Programs
+
+| Program | Description |
+|---------|-------------|
+| `hello_world` | Prints "Hello World!" via UART |
+| `demo_blink_led` | Blinks LEDs (not ideal for simulation - uses long delays) |
+| `demo_crc` | CRC computation demo |
+| `demo_trng` | True random number generator demo |
+
+See `sw/example/` for more programs.
+
+### Build Requirements
+
+- RISC-V GCC toolchain (`riscv-none-elf-gcc` or `riscv32-unknown-elf-gcc`)
+- `image_gen` utility (build with `sw/image_gen/build_msvc.bat` on Windows)
+
 ## Usage
 
 ### Windows
