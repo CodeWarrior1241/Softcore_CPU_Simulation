@@ -47,3 +47,6 @@ sim/questa/modelsim.ini
 *.mpf
 *.cr.mti
 *.mpf.bak
+
+# NVC simulation artifacts
+sim/NVC/work/
