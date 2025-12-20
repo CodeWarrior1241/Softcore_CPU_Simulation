@@ -50,3 +50,7 @@ sim/questa/modelsim.ini
 
 # NVC simulation artifacts
 sim/NVC/work/
+
+# GHDL simulation artifacts
+sim/GHDL/work/
+*.cf
