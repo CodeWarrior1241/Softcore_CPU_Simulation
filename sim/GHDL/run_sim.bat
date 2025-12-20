@@ -11,7 +11,7 @@ REM Configuration
 set GHDL=ghdl
 set WORK_DIR=work
 set TOP_ENTITY=neorv32_tb
-set SIM_TIME=10ms
+set SIM_TIME=150ms
 set WAVE_FORMAT=
 set WAVE_FILE=
 set NO_LOG=0
@@ -61,13 +61,15 @@ if "%~1"=="--no-log" (
     goto parse_args
 )
 if "%~1"=="--clean" (
-    echo Cleaning work directory...
+    echo Cleaning work directory and simulation artifacts...
     if exist %WORK_DIR% rmdir /s /q %WORK_DIR%
     if exist *.vcd del /q *.vcd
     if exist *.ghw del /q *.ghw
     if exist *.fst del /q *.fst
     if exist *.log del /q *.log
     if exist *.cf del /q *.cf
+    if exist neorv32.tracer*.log del /q neorv32.tracer*.log
+    if exist tb.uart*.log del /q tb.uart*.log
     echo Done.
     exit /b 0
 )
@@ -115,6 +117,10 @@ if defined WAVE_FILE (
     echo Waveform:        disabled
 )
 echo ==========================================
+
+REM Clean up previous simulation logs
+if exist tb.uart*.log del /q tb.uart*.log
+if exist neorv32.tracer*.log del /q neorv32.tracer*.log
 
 REM Create work directory
 if not exist %WORK_DIR% mkdir %WORK_DIR%

@@ -11,7 +11,7 @@ REM Configuration
 set NVC=nvc
 set WORK_DIR=work
 set TOP_ENTITY=neorv32_tb
-set SIM_TIME=10ms
+set SIM_TIME=150ms
 set WAVE_FILE=neorv32_tb.fst
 
 REM Parse command line arguments
@@ -30,8 +30,12 @@ if "%~1"=="--wave" (
     goto parse_args
 )
 if "%~1"=="--clean" (
-    echo Cleaning work directory...
+    echo Cleaning work directory and simulation artifacts...
     if exist %WORK_DIR% rmdir /s /q %WORK_DIR%
+    if exist *.fst del /q *.fst
+    if exist *.log del /q *.log
+    if exist neorv32.tracer*.log del /q neorv32.tracer*.log
+    if exist tb.uart*.log del /q tb.uart*.log
     echo Done.
     exit /b 0
 )
@@ -70,6 +74,10 @@ echo ==========================================
 echo Simulation time: %SIM_TIME%
 echo Waveform file:   %WAVE_FILE%
 echo ==========================================
+
+REM Clean up previous simulation logs
+if exist tb.uart*.log del /q tb.uart*.log
+if exist neorv32.tracer*.log del /q neorv32.tracer*.log
 
 REM Create work directory
 if not exist %WORK_DIR% mkdir %WORK_DIR%
@@ -180,7 +188,7 @@ echo.
 echo [3/3] Running simulation...
 echo ==========================================
 
-%NVC% --std=2008 --work=work:%WORK_DIR%/work -L %WORK_DIR% -r %TOP_ENTITY% --stop-time=%SIM_TIME% --wave=%WAVE_FILE%
+%NVC% --std=2008 --work=work:%WORK_DIR%/work -L %WORK_DIR% -r %TOP_ENTITY% --stop-time=%SIM_TIME% --wave=%WAVE_FILE% --stats
 if errorlevel 1 goto error
 
 echo.

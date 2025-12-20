@@ -11,7 +11,7 @@ set -e
 GHDL="${GHDL:-ghdl}"
 WORK_DIR="work"
 TOP_ENTITY="neorv32_tb"
-SIM_TIME="10ms"
+SIM_TIME="150ms"
 WAVE_FORMAT=""
 WAVE_FILE=""
 NO_LOG=0
@@ -58,9 +58,9 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --clean)
-            echo "Cleaning work directory..."
+            echo "Cleaning work directory and simulation artifacts..."
             rm -rf "$WORK_DIR"
-            rm -f *.vcd *.ghw *.fst *.log *.cf
+            rm -f *.vcd *.ghw *.fst *.log *.cf neorv32.tracer*.log tb.uart*.log
             echo "Done."
             exit 0
             ;;
@@ -110,6 +110,9 @@ else
     echo "Waveform:        disabled"
 fi
 echo "=========================================="
+
+# Clean up previous simulation logs
+rm -f tb.uart*.log neorv32.tracer*.log
 
 # Create work directory
 mkdir -p "$WORK_DIR"

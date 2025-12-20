@@ -11,7 +11,7 @@ set -e
 NVC="${NVC:-nvc}"
 WORK_DIR="work"
 TOP_ENTITY="neorv32_tb"
-SIM_TIME="10ms"
+SIM_TIME="150ms"
 WAVE_FILE="neorv32_tb.fst"
 
 # Change to script directory
@@ -29,8 +29,9 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --clean)
-            echo "Cleaning work directory..."
+            echo "Cleaning work directory and simulation artifacts..."
             rm -rf "$WORK_DIR"
+            rm -f *.fst *.log neorv32.tracer*.log tb.uart*.log
             echo "Done."
             exit 0
             ;;
@@ -71,6 +72,9 @@ echo "=========================================="
 echo "Simulation time: $SIM_TIME"
 echo "Waveform file:   $WAVE_FILE"
 echo "=========================================="
+
+# Clean up previous simulation logs
+rm -f tb.uart*.log neorv32.tracer*.log
 
 # Create work directory
 mkdir -p "$WORK_DIR"
@@ -170,7 +174,7 @@ echo ""
 echo "[3/3] Running simulation..."
 echo "=========================================="
 
-$NVC --std=2008 --work=work:$WORK_DIR/work -L $WORK_DIR -r $TOP_ENTITY --stop-time=$SIM_TIME --wave=$WAVE_FILE
+$NVC --std=2008 --work=work:$WORK_DIR/work -L $WORK_DIR -r $TOP_ENTITY --stop-time=$SIM_TIME --wave=$WAVE_FILE --stats
 
 echo ""
 echo "=========================================="
