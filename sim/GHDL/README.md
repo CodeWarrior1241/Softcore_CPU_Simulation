@@ -143,6 +143,66 @@ Remove all generated files:
 ./run_sim.sh --clean
 ```
 
+## Overriding Testbench Generics
+
+You can customize the CPU configuration by passing generic values at runtime. This allows testing software that requires different CPU features without modifying the testbench.
+
+### Available Generics
+
+| Generic | Type | Default | Description |
+|---------|------|---------|-------------|
+| `CLOCK_FREQUENCY` | natural | 100000000 | Clock frequency in Hz |
+| `DUAL_CORE_EN` | boolean | true | Enable dual-core SMP |
+| `BOOT_MODE_SELECT` | natural | 2 | Boot mode (2 = IMEM) |
+| `IMEM_SIZE` | natural | 32768 | Instruction memory size (bytes) |
+| `DMEM_SIZE` | natural | 8192 | Data memory size (bytes) |
+| `RISCV_ISA_C` | boolean | true | Compressed instructions |
+| `RISCV_ISA_M` | boolean | true | Multiply/divide extension |
+| `RISCV_ISA_U` | boolean | true | User mode extension |
+| `RISCV_ISA_Zfinx` | boolean | true | Floating-point extension |
+| `ICACHE_EN` | boolean | true | Instruction cache enable |
+| `DCACHE_EN` | boolean | true | Data cache enable |
+
+See `sim/neorv32_tb.vhd` for the complete list of available generics.
+
+### Passing Generics via Command Line
+
+Generics are passed during the run phase using the `-g` flag:
+
+```bash
+# Single generic
+ghdl -r --work=neorv32 --workdir=work --std=08 neorv32_tb -gIMEM_SIZE=65536 --stop-time=10ms
+
+# Multiple generics
+ghdl -r --work=neorv32 --workdir=work --std=08 neorv32_tb \
+    -gIMEM_SIZE=65536 \
+    -gDUAL_CORE_EN=false \
+    -gRISCV_ISA_M=false \
+    --stop-time=10ms
+```
+
+### Examples
+
+```bash
+# First, analyze the design (run once)
+./run_sim.sh --time 0ms  # This analyzes but exits immediately
+
+# Then run with custom generics
+ghdl -r --work=neorv32 --workdir=work --std=08 neorv32_tb \
+    -gIMEM_SIZE=65536 --stop-time=10ms
+
+# Single-core configuration
+ghdl -r --work=neorv32 --workdir=work --std=08 neorv32_tb \
+    -gDUAL_CORE_EN=false --stop-time=10ms
+
+# Minimal configuration with waveform output
+ghdl -r --work=neorv32 --workdir=work --std=08 neorv32_tb \
+    -gICACHE_EN=false -gDCACHE_EN=false -gRISCV_ISA_Zfinx=false \
+    --stop-time=10ms --wave=minimal_config.ghw
+```
+
+**Note:** When using generics, you must run GHDL manually rather than using the `run_sim` scripts.
+
 ## Waveform Format Comparison
 
 | Format | Extension | Description | Best For |

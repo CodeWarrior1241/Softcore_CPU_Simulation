@@ -70,6 +70,61 @@ Clean up work directory:
 run_sim.bat --clean
 ```
 
+## Overriding Testbench Generics
+
+You can customize the CPU configuration by passing generic values during elaboration. This allows testing software that requires different CPU features without modifying the testbench.
+
+### Available Generics
+
+| Generic | Type | Default | Description |
+|---------|------|---------|-------------|
+| `CLOCK_FREQUENCY` | natural | 100000000 | Clock frequency in Hz |
+| `DUAL_CORE_EN` | boolean | true | Enable dual-core SMP |
+| `BOOT_MODE_SELECT` | natural | 2 | Boot mode (2 = IMEM) |
+| `IMEM_SIZE` | natural | 32768 | Instruction memory size (bytes) |
+| `DMEM_SIZE` | natural | 8192 | Data memory size (bytes) |
+| `RISCV_ISA_C` | boolean | true | Compressed instructions |
+| `RISCV_ISA_M` | boolean | true | Multiply/divide extension |
+| `RISCV_ISA_U` | boolean | true | User mode extension |
+| `RISCV_ISA_Zfinx` | boolean | true | Floating-point extension |
+| `ICACHE_EN` | boolean | true | Instruction cache enable |
+| `DCACHE_EN` | boolean | true | Data cache enable |
+
+See `sim/neorv32_tb.vhd` for the complete list of available generics.
+
+### Passing Generics via Command Line
+
+Generics are passed during the elaboration phase using the `-g` flag:
+
+```bash
+# Single generic
+nvc --std=2008 --work=work:work/work -L work -e neorv32_tb -gIMEM_SIZE=65536
+
+# Multiple generics
+nvc --std=2008 --work=work:work/work -L work -e neorv32_tb \
+    -gIMEM_SIZE=65536 \
+    -gDUAL_CORE_EN=false \
+    -gRISCV_ISA_M=false
+```
+
+### Examples
+
+```bash
+# Simulate with 64KB instruction memory
+nvc -e neorv32_tb -gIMEM_SIZE=65536
+nvc -r neorv32_tb --stop-time=10ms
+
+# Simulate single-core configuration
+nvc -e neorv32_tb -gDUAL_CORE_EN=false
+nvc -r neorv32_tb --stop-time=10ms
+
+# Minimal configuration (no caches, no FPU)
+nvc -e neorv32_tb -gICACHE_EN=false -gDCACHE_EN=false -gRISCV_ISA_Zfinx=false
+nvc -r neorv32_tb --stop-time=10ms
+```
+
+**Note:** When using generics, you must run the elaboration and simulation steps manually rather than using the `run_sim` scripts.
+
 ## Viewing Waveforms
 
 After simulation completes, view the waveform with GTKWave:
