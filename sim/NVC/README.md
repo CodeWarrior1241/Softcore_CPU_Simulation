@@ -84,14 +84,15 @@ chmod +x run_sim.sh
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--time TIME` | Simulation duration | `10ms` |
+| `--time TIME` | Simulation duration | `150ms` |
 | `--wave FILE` | Waveform output filename | `neorv32_tb.fst` |
+| `--quiet` | Suppress simulation progress output | - |
 | `--clean` | Remove work directory and exit | - |
 | `--help` | Display help message | - |
 
 ### Examples
 
-Run with default settings (10ms simulation):
+Run with default settings (150ms simulation):
 ```
 run_sim.bat
 ```

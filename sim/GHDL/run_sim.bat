@@ -15,6 +15,7 @@ set SIM_TIME=150ms
 set WAVE_FORMAT=
 set WAVE_FILE=
 set NO_LOG=0
+set QUIET=0
 
 REM Parse command line arguments
 :parse_args
@@ -60,6 +61,11 @@ if "%~1"=="--no-log" (
     shift
     goto parse_args
 )
+if "%~1"=="--quiet" (
+    set QUIET=1
+    shift
+    goto parse_args
+)
 if "%~1"=="--clean" (
     echo Cleaning work directory and simulation artifacts...
     if exist %WORK_DIR% rmdir /s /q %WORK_DIR%
@@ -84,6 +90,7 @@ if "%~1"=="--help" (
     echo   --ghw [FILE]   Generate GHW waveform (default: neorv32_tb.ghw)
     echo   --fst [FILE]   Generate FST waveform (default: neorv32_tb.fst)
     echo   --no-log       Disable logging to ghdl.log
+    echo   --quiet        Suppress simulation progress output
     echo   --clean        Remove work directory and generated files
     echo   --help         Show this help message
     echo.
@@ -172,10 +179,18 @@ if defined WAVE_FILE (
 
 REM Run simulation with wall clock timing
 set START_TIME=%TIME%
-if "%NO_LOG%"=="1" (
-    %RUN_CMD%
+if "%QUIET%"=="1" (
+    if "%NO_LOG%"=="1" (
+        %RUN_CMD% >nul 2>&1
+    ) else (
+        %RUN_CMD% >ghdl.log 2>&1
+    )
 ) else (
-    %RUN_CMD% 2>&1 | tee ghdl.log
+    if "%NO_LOG%"=="1" (
+        %RUN_CMD%
+    ) else (
+        %RUN_CMD% 2>&1 | tee ghdl.log
+    )
 )
 if errorlevel 1 goto error
 set END_TIME=%TIME%

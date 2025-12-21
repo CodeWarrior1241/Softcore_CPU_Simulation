@@ -118,11 +118,12 @@ chmod +x run_sim.sh
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--time TIME` | Simulation duration | `10ms` |
+| `--time TIME` | Simulation duration | `150ms` |
 | `--vcd [FILE]` | Generate VCD waveform | `neorv32_tb.vcd` |
 | `--ghw [FILE]` | Generate GHW waveform (GHDL native) | `neorv32_tb.ghw` |
 | `--fst [FILE]` | Generate FST waveform (compact) | `neorv32_tb.fst` |
 | `--no-log` | Disable logging to ghdl.log | - |
+| `--quiet` | Suppress simulation progress output | - |
 | `--clean` | Remove work directory and generated files | - |
 | `--help` | Display help message | - |
 
@@ -133,7 +134,7 @@ chmod +x run_sim.sh
 For fast simulation when you only need console output:
 
 ```bash
-# Run with default 10ms simulation time
+# Run with default 150ms simulation time
 ./run_sim.sh
 
 # Run for 50ms
@@ -141,6 +142,9 @@ For fast simulation when you only need console output:
 
 # Run without creating a log file
 ./run_sim.sh --no-log
+
+# Run with suppressed output (quiet mode)
+./run_sim.sh --quiet
 ```
 
 ### Running With Waveforms

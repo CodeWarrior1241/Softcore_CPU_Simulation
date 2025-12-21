@@ -15,6 +15,7 @@ SIM_TIME="150ms"
 WAVE_FORMAT=""
 WAVE_FILE=""
 NO_LOG=0
+QUIET=0
 
 # Change to script directory
 cd "$(dirname "$0")"
@@ -57,6 +58,10 @@ while [[ $# -gt 0 ]]; do
             NO_LOG=1
             shift
             ;;
+        --quiet)
+            QUIET=1
+            shift
+            ;;
         --clean)
             echo "Cleaning work directory and simulation artifacts..."
             rm -rf "$WORK_DIR"
@@ -75,6 +80,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --ghw [FILE]   Generate GHW waveform (default: neorv32_tb.ghw)"
             echo "  --fst [FILE]   Generate FST waveform (default: neorv32_tb.fst)"
             echo "  --no-log       Disable logging to ghdl.log"
+            echo "  --quiet        Suppress simulation progress output"
             echo "  --clean        Remove work directory and generated files"
             echo "  --help         Show this help message"
             echo ""
@@ -163,10 +169,18 @@ fi
 
 # Run simulation with wall clock timing
 START_TIME=$(date +%s%3N)
-if [[ $NO_LOG -eq 1 ]]; then
-    eval "$RUN_CMD"
+if [[ $QUIET -eq 1 ]]; then
+    if [[ $NO_LOG -eq 1 ]]; then
+        eval "$RUN_CMD" >/dev/null 2>&1
+    else
+        eval "$RUN_CMD" >ghdl.log 2>&1
+    fi
 else
-    eval "$RUN_CMD" 2>&1 | tee ghdl.log
+    if [[ $NO_LOG -eq 1 ]]; then
+        eval "$RUN_CMD"
+    else
+        eval "$RUN_CMD" 2>&1 | tee ghdl.log
+    fi
 fi
 END_TIME=$(date +%s%3N)
 ELAPSED_MS=$((END_TIME - START_TIME))
