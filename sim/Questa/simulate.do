@@ -14,7 +14,7 @@ do compile.do
 
 # Default simulation time (can be overridden)
 if {![info exists SIM_TIME]} {
-    set SIM_TIME "10 ms"
+    set SIM_TIME "150ms"
 }
 
 puts "=========================================="
@@ -67,12 +67,17 @@ configure wave -namecolwidth 250
 configure wave -valuecolwidth 120
 configure wave -signalnamewidth 1
 
-# Run simulation
+# Run simulation with wall clock timing
+set start_time [clock milliseconds]
 run $SIM_TIME
+set end_time [clock milliseconds]
+set elapsed_ms [expr {$end_time - $start_time}]
+set elapsed_sec [expr {$elapsed_ms / 1000.0}]
 
 # Zoom to fit all waveforms
 wave zoom full
 
 puts "=========================================="
 puts "Simulation Complete!"
+puts [format "Wall clock time: %.2f seconds" $elapsed_sec]
 puts "=========================================="

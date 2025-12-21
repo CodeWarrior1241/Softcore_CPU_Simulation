@@ -13,6 +13,7 @@ WORK_DIR="work"
 TOP_ENTITY="neorv32_tb"
 SIM_TIME="150ms"
 WAVE_FILE="neorv32_tb.fst"
+QUIET=0
 
 # Change to script directory
 cd "$(dirname "$0")"
@@ -28,6 +29,10 @@ while [[ $# -gt 0 ]]; do
             WAVE_FILE="$2"
             shift 2
             ;;
+        --quiet)
+            QUIET=1
+            shift
+            ;;
         --clean)
             echo "Cleaning work directory and simulation artifacts..."
             rm -rf "$WORK_DIR"
@@ -41,15 +46,17 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: ./run_sim.sh [options]"
             echo ""
             echo "Options:"
-            echo "  --time TIME    Set simulation time (default: 10ms)"
+            echo "  --time TIME    Set simulation time (default: 150ms)"
             echo "  --wave FILE    Set waveform output file (default: neorv32_tb.fst)"
-            echo "  --clean        Remove work directory and exit"
+            echo "  --quiet        Suppress simulation progress output"
+            echo "  --clean        Remove work directory and generated files"
             echo "  --help         Show this help message"
             echo ""
             echo "Examples:"
-            echo "  ./run_sim.sh                    Run with defaults (10ms)"
+            echo "  ./run_sim.sh                    Run with defaults (150ms)"
             echo "  ./run_sim.sh --time 50ms        Run for 50ms"
             echo "  ./run_sim.sh --wave sim.fst     Output waveform to sim.fst"
+            echo "  ./run_sim.sh --quiet            Run without progress output"
             exit 0
             ;;
         *)
@@ -174,7 +181,11 @@ echo ""
 echo "[3/3] Running simulation..."
 echo "=========================================="
 
-$NVC --std=2008 --work=work:$WORK_DIR/work -L $WORK_DIR -r $TOP_ENTITY --stop-time=$SIM_TIME --wave=$WAVE_FILE --stats
+if [ "$QUIET" -eq 1 ]; then
+    $NVC --std=2008 --messages=compact --work=work:$WORK_DIR/work -L $WORK_DIR -r $TOP_ENTITY --stop-time=$SIM_TIME --wave=$WAVE_FILE --stats 2>/dev/null
+else
+    $NVC --std=2008 --work=work:$WORK_DIR/work -L $WORK_DIR -r $TOP_ENTITY --stop-time=$SIM_TIME --wave=$WAVE_FILE --stats
+fi
 
 echo ""
 echo "=========================================="

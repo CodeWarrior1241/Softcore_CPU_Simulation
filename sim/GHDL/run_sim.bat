@@ -79,7 +79,7 @@ if "%~1"=="--help" (
     echo Usage: run_sim.bat [options]
     echo.
     echo Options:
-    echo   --time TIME    Set simulation time (default: 10ms)
+    echo   --time TIME    Set simulation time (default: 150ms)
     echo   --vcd [FILE]   Generate VCD waveform (default: neorv32_tb.vcd)
     echo   --ghw [FILE]   Generate GHW waveform (default: neorv32_tb.ghw)
     echo   --fst [FILE]   Generate FST waveform (default: neorv32_tb.fst)
@@ -88,7 +88,7 @@ if "%~1"=="--help" (
     echo   --help         Show this help message
     echo.
     echo Examples:
-    echo   run_sim.bat                      Run with defaults (10ms, no waveform)
+    echo   run_sim.bat                      Run with defaults (150ms, no waveform)
     echo   run_sim.bat --time 50ms          Run for 50ms
     echo   run_sim.bat --vcd                Generate VCD waveform
     echo   run_sim.bat --ghw sim.ghw        Generate GHW waveform with custom name
@@ -170,17 +170,25 @@ if defined WAVE_FILE (
     if "%WAVE_FORMAT%"=="fst" set RUN_CMD=%RUN_CMD% --fst=%WAVE_FILE%
 )
 
-REM Run simulation
+REM Run simulation with wall clock timing
+set START_TIME=%TIME%
 if "%NO_LOG%"=="1" (
     %RUN_CMD%
 ) else (
     %RUN_CMD% 2>&1 | tee ghdl.log
 )
 if errorlevel 1 goto error
+set END_TIME=%TIME%
+
+REM Calculate elapsed time
+for /f "tokens=1-4 delims=:." %%a in ("%START_TIME%") do set /a "START_S=(%%a*3600)+(%%b*60)+%%c"
+for /f "tokens=1-4 delims=:." %%a in ("%END_TIME%") do set /a "END_S=(%%a*3600)+(%%b*60)+%%c"
+set /a "ELAPSED_S=END_S-START_S"
 
 echo.
 echo ==========================================
 echo Simulation complete!
+echo Wall clock time: %ELAPSED_S% seconds
 if defined WAVE_FILE (
     echo Waveform saved to: %WAVE_FILE%
     echo.

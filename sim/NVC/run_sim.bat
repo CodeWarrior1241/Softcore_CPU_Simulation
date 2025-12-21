@@ -13,6 +13,7 @@ set WORK_DIR=work
 set TOP_ENTITY=neorv32_tb
 set SIM_TIME=150ms
 set WAVE_FILE=neorv32_tb.fst
+set QUIET=0
 
 REM Parse command line arguments
 :parse_args
@@ -26,6 +27,11 @@ if "%~1"=="--time" (
 if "%~1"=="--wave" (
     set WAVE_FILE=%~2
     shift
+    shift
+    goto parse_args
+)
+if "%~1"=="--quiet" (
+    set QUIET=1
     shift
     goto parse_args
 )
@@ -45,15 +51,17 @@ if "%~1"=="--help" (
     echo Usage: run_sim.bat [options]
     echo.
     echo Options:
-    echo   --time TIME    Set simulation time (default: 10ms)
+    echo   --time TIME    Set simulation time (default: 150ms)
     echo   --wave FILE    Set waveform output file (default: neorv32_tb.fst)
-    echo   --clean        Remove work directory and exit
+    echo   --quiet        Suppress simulation progress output
+    echo   --clean        Remove work directory and generated files
     echo   --help         Show this help message
     echo.
     echo Examples:
-    echo   run_sim.bat                    Run with defaults (10ms)
+    echo   run_sim.bat                    Run with defaults (150ms)
     echo   run_sim.bat --time 50ms        Run for 50ms
     echo   run_sim.bat --wave sim.fst     Output waveform to sim.fst
+    echo   run_sim.bat --quiet            Run without progress output
     exit /b 0
 )
 shift
@@ -188,7 +196,11 @@ echo.
 echo [3/3] Running simulation...
 echo ==========================================
 
-%NVC% --std=2008 --work=work:%WORK_DIR%/work -L %WORK_DIR% -r %TOP_ENTITY% --stop-time=%SIM_TIME% --wave=%WAVE_FILE% --stats
+if "%QUIET%"=="1" (
+    %NVC% --std=2008 --messages=compact --work=work:%WORK_DIR%/work -L %WORK_DIR% -r %TOP_ENTITY% --stop-time=%SIM_TIME% --wave=%WAVE_FILE% --stats 2>nul
+) else (
+    %NVC% --std=2008 --work=work:%WORK_DIR%/work -L %WORK_DIR% -r %TOP_ENTITY% --stop-time=%SIM_TIME% --wave=%WAVE_FILE% --stats
+)
 if errorlevel 1 goto error
 
 echo.

@@ -70,7 +70,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: ./run_sim.sh [options]"
             echo ""
             echo "Options:"
-            echo "  --time TIME    Set simulation time (default: 10ms)"
+            echo "  --time TIME    Set simulation time (default: 150ms)"
             echo "  --vcd [FILE]   Generate VCD waveform (default: neorv32_tb.vcd)"
             echo "  --ghw [FILE]   Generate GHW waveform (default: neorv32_tb.ghw)"
             echo "  --fst [FILE]   Generate FST waveform (default: neorv32_tb.fst)"
@@ -79,7 +79,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --help         Show this help message"
             echo ""
             echo "Examples:"
-            echo "  ./run_sim.sh                      Run with defaults (10ms, no waveform)"
+            echo "  ./run_sim.sh                      Run with defaults (150ms, no waveform)"
             echo "  ./run_sim.sh --time 50ms          Run for 50ms"
             echo "  ./run_sim.sh --vcd                Generate VCD waveform"
             echo "  ./run_sim.sh --ghw sim.ghw        Generate GHW waveform with custom name"
@@ -161,16 +161,21 @@ if [[ -n "$WAVE_FILE" ]]; then
     esac
 fi
 
-# Run simulation
+# Run simulation with wall clock timing
+START_TIME=$(date +%s%3N)
 if [[ $NO_LOG -eq 1 ]]; then
     eval "$RUN_CMD"
 else
     eval "$RUN_CMD" 2>&1 | tee ghdl.log
 fi
+END_TIME=$(date +%s%3N)
+ELAPSED_MS=$((END_TIME - START_TIME))
+ELAPSED_SEC=$(echo "scale=2; $ELAPSED_MS / 1000" | bc)
 
 echo ""
 echo "=========================================="
 echo "Simulation complete!"
+echo "Wall clock time: ${ELAPSED_SEC} seconds"
 if [[ -n "$WAVE_FILE" ]]; then
     echo "Waveform saved to: $WAVE_FILE"
     echo ""
