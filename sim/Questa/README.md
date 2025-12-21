@@ -94,10 +94,10 @@ Options:
 ./run_sim.sh
 
 # Run batch simulation for 1ms
-./run_sim.sh -batch -time 1ms
+./run_sim.sh --batch --time 1ms
 
 # Run GUI simulation for 100us
-./run_sim.sh -gui -time 100us
+./run_sim.sh --gui --time 100us
 ```
 
 ## Manual Questa Usage

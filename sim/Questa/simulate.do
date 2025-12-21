@@ -54,9 +54,11 @@ add wave -divider "XBUS Interface"
 add wave -hex /neorv32_tb/xbus_core_req
 add wave -hex /neorv32_tb/xbus_core_rsp
 
-# Add CPU internal signals (optional - for deeper debugging)
-add wave -divider "CPU Core"
-add wave -hex /neorv32_tb/neorv32_top_inst/core_complex_gen/neorv32_core_inst/cpu_core0/neorv32_cpu_inst/*
+# Add CPU internal signals (optional - may not exist in all configurations)
+catch {
+    add wave -divider "CPU Core"
+    add wave -hex /neorv32_tb/neorv32_top_inst/core_complex_gen/neorv32_core_inst/cpu_core0/neorv32_cpu_inst/*
+}
 
 # ================================================================================
 # Run Simulation
@@ -67,17 +69,18 @@ configure wave -namecolwidth 250
 configure wave -valuecolwidth 120
 configure wave -signalnamewidth 1
 
-# Run simulation with wall clock timing
+# Record start time
 set start_time [clock milliseconds]
+
+# Run simulation
 run $SIM_TIME
+
+# Calculate and display wall clock time
 set end_time [clock milliseconds]
 set elapsed_ms [expr {$end_time - $start_time}]
-set elapsed_sec [expr {$elapsed_ms / 1000.0}]
-
-# Zoom to fit all waveforms
-wave zoom full
-
+set elapsed_sec [format "%.2f" [expr {$elapsed_ms / 1000.0}]]
 puts "=========================================="
 puts "Simulation Complete!"
-puts [format "Wall clock time: %.2f seconds" $elapsed_sec]
+puts "Wall clock time: $elapsed_sec seconds"
 puts "=========================================="
+catch {wave zoom full}
