@@ -1,6 +1,6 @@
 # Softcore CPU Simulation
 
-> **Fork Notice:** This repository is forked from the [NEORV32 RISC-V Processor](https://github.com/stnolting/neorv32) by [Stephan Nolting](https://github.com/stnolting). The original project is an excellent, well-documented RISC-V softcore processor. This fork adds Questa Prime simulation support for VHDL-2008 development and testing.
+> **Fork Notice:** This repository is forked from the [NEORV32 RISC-V Processor](https://github.com/stnolting/neorv32) by [Stephan Nolting](https://github.com/stnolting). The original project is an excellent, well-documented RISC-V softcore processor. This fork adds Questa Prime simulation support for VHDL-2008 development and testing, as well as extensive tailoring for a particular software load to be simulated.
 >
 > Original project: https://github.com/stnolting/neorv32
 > License: [BSD-3-Clause](LICENSE)
