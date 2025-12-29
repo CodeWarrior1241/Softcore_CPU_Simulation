@@ -172,9 +172,11 @@ if errorlevel 1 goto error
 
 REM Testbench support modules
 %NVC% --std=2008 --work=work:%WORK_DIR%/work -L %WORK_DIR% -a ../sim_uart_rx.vhd
+%NVC% --std=2008 --work=work:%WORK_DIR%/work -L %WORK_DIR% -a ../sim_uart_tx.vhd
 %NVC% --std=2008 --work=work:%WORK_DIR%/work -L %WORK_DIR% -a ../xbus_memory.vhd
 %NVC% --std=2008 --work=work:%WORK_DIR%/work -L %WORK_DIR% -a ../xbus_gateway.vhd
 %NVC% --std=2008 --work=work:%WORK_DIR%/work -L %WORK_DIR% -a ../xbus_fmem.vhd
+%NVC% --std=2008 --work=work:%WORK_DIR%/work -L %WORK_DIR% -a ../iq_bram.vhd
 if errorlevel 1 goto error
 
 REM Main testbench

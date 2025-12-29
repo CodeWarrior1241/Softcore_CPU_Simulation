@@ -160,9 +160,11 @@ $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_top.v
 
 # Testbench support modules
 $NVC --std=2008 --work=work:$WORK_DIR/work -L $WORK_DIR -a ../sim_uart_rx.vhd
+$NVC --std=2008 --work=work:$WORK_DIR/work -L $WORK_DIR -a ../sim_uart_tx.vhd
 $NVC --std=2008 --work=work:$WORK_DIR/work -L $WORK_DIR -a ../xbus_memory.vhd
 $NVC --std=2008 --work=work:$WORK_DIR/work -L $WORK_DIR -a ../xbus_gateway.vhd
 $NVC --std=2008 --work=work:$WORK_DIR/work -L $WORK_DIR -a ../xbus_fmem.vhd
+$NVC --std=2008 --work=work:$WORK_DIR/work -L $WORK_DIR -a ../iq_bram.vhd
 
 # Main testbench
 $NVC --std=2008 --work=work:$WORK_DIR/work -L $WORK_DIR -a ../neorv32_tb.vhd

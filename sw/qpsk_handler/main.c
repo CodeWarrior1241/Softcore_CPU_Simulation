@@ -41,6 +41,9 @@
 
 /** GPIO pin for RF enable control */
 #define RF_ENABLE_PIN 0
+
+/** IQ BRAM base address (memory-mapped via AXI switch) */
+#define IQ_BRAM_BASE 0xC0000000UL
 /**@}*/
 
 
@@ -122,40 +125,22 @@ static void handle_enable_snapshot(void) {
 /**********************************************************************//**
  * Capture IQ samples from hardware into the buffer.
  *
- * @note This is a placeholder implementation that generates synthetic data.
- *       Replace with actual hardware interface for production use.
+ * Reads IQ samples from the IQ BRAM at address 0xC0000000. The BRAM is
+ * connected via AXI switch and contains 1024 x 32-bit IQ samples where:
+ *   - I[15:0] is in the lower 16 bits
+ *   - Q[31:16] is in the upper 16 bits
  **************************************************************************/
 static void capture_iq_samples(void) {
-  // TODO: Replace with actual hardware capture
-  // This placeholder generates synthetic QPSK constellation points
-
-  // Simple LFSR for pseudo-random data
-  static uint32_t lfsr = 0xACE1u;
+  // Pointer to IQ BRAM (memory-mapped)
+  volatile uint32_t *iq_bram = (volatile uint32_t *)IQ_BRAM_BASE;
 
   for (int i = 0; i < NUM_IQ_SAMPLES; i++) {
-    // Generate pseudo-random symbol (0-3 for QPSK)
-    lfsr = (lfsr >> 1) ^ (-(lfsr & 1u) & 0xB400u);
-    int symbol = lfsr & 0x03;
+    // Read 32-bit IQ word from BRAM
+    uint32_t iq_word = iq_bram[i];
 
-    // QPSK constellation points (scaled to 16-bit range)
-    // Ideal points at +/- 16384 (0x4000) for I and Q
-    int16_t i_val, q_val;
-    switch (symbol) {
-      case 0: i_val =  16384; q_val =  16384; break;  // +I, +Q
-      case 1: i_val = -16384; q_val =  16384; break;  // -I, +Q
-      case 2: i_val = -16384; q_val = -16384; break;  // -I, -Q
-      case 3: i_val =  16384; q_val = -16384; break;  // +I, -Q
-      default: i_val = 0; q_val = 0; break;
-    }
-
-    // Add some noise for realism (simple noise from LFSR)
-    lfsr = (lfsr >> 1) ^ (-(lfsr & 1u) & 0xB400u);
-    int16_t noise_i = (int16_t)((lfsr & 0x1FF) - 256);  // +/- 256
-    lfsr = (lfsr >> 1) ^ (-(lfsr & 1u) & 0xB400u);
-    int16_t noise_q = (int16_t)((lfsr & 0x1FF) - 256);
-
-    i_val += noise_i;
-    q_val += noise_q;
+    // Extract I (lower 16 bits) and Q (upper 16 bits)
+    int16_t i_val = (int16_t)(iq_word & 0xFFFF);
+    int16_t q_val = (int16_t)((iq_word >> 16) & 0xFFFF);
 
     // Pack into buffer (little-endian: I_lo, I_hi, Q_lo, Q_hi)
     int idx = i * 4;

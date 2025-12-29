@@ -67,7 +67,41 @@ The NEORV32 processor acts as a bridge between the MATLAB host application and t
 
 - NEORV32 processor with UART0 enabled
 - GPIO module for RF control output
-- Interface to IQ sample capture hardware (memory-mapped or via custom function unit)
+- IQ sample BRAM at address `0xC0000000` (memory-mapped via XBUS)
+
+## Memory Configuration
+
+The application is configured for the following memory layout:
+
+| Memory | Size | Address Range |
+|--------|------|---------------|
+| IMEM (code) | 16 KB | `0x00000000` - `0x00003FFF` |
+| DMEM (data) | 8 KB | `0x80000000` - `0x80001FFF` |
+| IQ BRAM | 8 KB | `0xC0000000` - `0xC0001FFF` |
+
+### DMEM Layout
+
+The 8KB internal data memory is organized as follows:
+
+```
+0x80000000  +─────────────────+  RAM base
+            │     .data       │  Initialized global variables
+            ├─────────────────┤
+            │     .bss        │  Uninitialized globals (iq_buffer, etc.)
+            │                 │  ~4.3 KB
+            ├─────────────────┤
+            │     .heap       │  Dynamic allocation (grows upward)
+            │        ↓        │
+            │                 │
+            │    (free)       │  ~3.7 KB available
+            │                 │
+            │        ↑        │
+            │     stack       │  Function calls, local vars (grows downward)
+            ├─────────────────┤
+0x80002000  +─────────────────+  RAM top (8 KB)
+```
+
+**Important:** The `__neorv32_ram_size` linker symbol must match the testbench `DMEM_SIZE` generic. A mismatch causes the stack pointer to be placed outside valid memory, resulting in bus errors.
 
 ## UART Configuration
 

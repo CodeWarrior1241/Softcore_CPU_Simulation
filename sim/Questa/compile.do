@@ -113,9 +113,11 @@ puts "=========================================="
 set VCOM_TB_OPTS "-2008 -explicit -work work"
 
 vcom {*}$VCOM_TB_OPTS ../sim_uart_rx.vhd
+vcom {*}$VCOM_TB_OPTS ../sim_uart_tx.vhd
 vcom {*}$VCOM_TB_OPTS ../xbus_memory.vhd
 vcom {*}$VCOM_TB_OPTS ../xbus_gateway.vhd
 vcom {*}$VCOM_TB_OPTS ../xbus_fmem.vhd
+vcom {*}$VCOM_TB_OPTS ../iq_bram.vhd
 
 # Main testbench
 vcom {*}$VCOM_TB_OPTS ../neorv32_tb.vhd

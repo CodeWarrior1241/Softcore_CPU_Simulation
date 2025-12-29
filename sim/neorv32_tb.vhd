@@ -86,8 +86,14 @@ architecture neorv32_tb_rtl of neorv32_tb is
   constant f_period_c : time := (1 sec) / CLOCK_FREQUENCY;
 
   -- IO connection --
-  signal uart0_txd, uart0_ctsn, uart1_txd, uart1_ctsn : std_ulogic;
+  signal uart0_txd, uart0_rxd, uart0_ctsn, uart1_txd, uart1_ctsn : std_ulogic;
   signal gpio : std_ulogic_vector(31 downto 0);
+
+  -- QPSK Tester UART TX signals --
+  signal qpsk_tx_data  : std_ulogic_vector(7 downto 0) := (others => '0');
+  signal qpsk_tx_valid : std_ulogic := '0';
+  signal qpsk_tx_ready : std_ulogic;
+  signal qpsk_txd      : std_ulogic := '1';
   signal i2c_scl, i2c_sda : std_logic;
   signal twi_scl_i, twi_scl_o, twi_sda_i, twi_sda_o : std_ulogic;
   signal twd_scl_i, twd_scl_o, twd_sda_i, twd_sda_o : std_ulogic;
@@ -113,6 +119,8 @@ architecture neorv32_tb_rtl of neorv32_tb is
   signal xbus_core_rsp, xbus_ext_mem_a_rsp, xbus_ext_mem_b_rsp, xbus_mmio_rsp, xbus_trig_rsp : xbus_rsp_t;
   signal xbus_fmem_data_req, xbus_fmem_tag_req : xbus_req_t;
   signal xbus_fmem_data_rsp, xbus_fmem_tag_rsp : xbus_rsp_t;
+  signal xbus_iq_bram_req : xbus_req_t;
+  signal xbus_iq_bram_rsp : xbus_rsp_t;
 
 begin
 
@@ -276,9 +284,9 @@ begin
     gpio_i         => gpio,
     -- primary UART0 --
     uart0_txd_o    => uart0_txd,
-    uart0_rxd_i    => uart1_txd,
+    uart0_rxd_i    => uart0_rxd,
     uart0_rtsn_o   => uart0_ctsn,
-    uart0_ctsn_i   => uart1_ctsn,
+    uart0_ctsn_i   => '0',
     -- secondary UART1 --
     uart1_txd_o    => uart1_txd,
     uart1_rxd_i    => uart0_txd,
@@ -398,16 +406,116 @@ begin
     rxd => uart0_txd
   );
 
-  sim_rx_uart1: entity work.sim_uart_rx
+  -- Note: UART1 receiver removed - not needed for QPSK handler testing
+  -- UART1 RX is connected to UART0 TX loopback in neorv32_top port map
+
+
+  -- QPSK Handler Test Sequence -------------------------------------------------------------
+  -- -------------------------------------------------------------------------------------------
+  -- Connect QPSK tester TX to UART0 RX
+  uart0_rxd <= qpsk_txd;
+
+  -- UART transmitter for sending test commands
+  sim_tx_qpsk: entity work.sim_uart_tx
   generic map (
-    NAME => "tb.uart1_rx",
+    NAME => "qpsk_tester",
     FCLK => real(CLOCK_FREQUENCY),
     BAUD => real(115200)
   )
   port map (
-    clk => clk_gen,
-    rxd => uart1_txd
+    clk      => clk_gen,
+    rstn     => rst_gen,
+    txd      => qpsk_txd,
+    tx_data  => qpsk_tx_data,
+    tx_valid => qpsk_tx_valid,
+    tx_ready => qpsk_tx_ready
   );
+
+  -- Test sequence process: sends QPSK commands after CPU initialization
+  -- Response verification is done by monitoring tb.uart0_rx.log output
+  qpsk_test_sequence: process
+    -- Procedure to send a string over UART with logging
+    procedure send_command(cmd : string) is
+    begin
+      report "QPSK_TEST: TX >> " & cmd;
+      for i in cmd'range loop
+        wait until rising_edge(clk_gen) and qpsk_tx_ready = '1';
+        qpsk_tx_data  <= std_ulogic_vector(to_unsigned(character'pos(cmd(i)), 8));
+        qpsk_tx_valid <= '1';
+        wait until rising_edge(clk_gen);
+        qpsk_tx_valid <= '0';
+      end loop;
+      -- Send LF terminator
+      wait until rising_edge(clk_gen) and qpsk_tx_ready = '1';
+      qpsk_tx_data  <= x"0A"; -- LF
+      qpsk_tx_valid <= '1';
+      wait until rising_edge(clk_gen);
+      qpsk_tx_valid <= '0';
+    end procedure;
+
+    -- Calculate response wait time based on expected response length
+    -- At 115200 baud: ~86.8us per character (10 bits per char)
+    -- Add margin for CPU processing time
+    constant CHAR_TIME : time := 87 us;
+    constant CPU_MARGIN : time := 5 ms;
+
+  begin
+    -- Wait for reset to complete and CPU to initialize
+    wait until rst_gen = '1';
+    wait for 50 ms; -- Wait for CPU boot and UART init
+
+    report "QPSK_TEST: ========================================";
+    report "QPSK_TEST: Starting QPSK Handler Test Sequence";
+    report "QPSK_TEST: ========================================";
+
+    ---------------------------------------------------------------------------
+    -- Test 1: Disable RF (verify initial state handling)
+    -- Expected response: "rf_disabled\n" (12 chars)
+    ---------------------------------------------------------------------------
+    report "QPSK_TEST: [Test 1] Sending 'disable_rf' command...";
+    send_command("disable_rf");
+    wait for CPU_MARGIN + (12 * CHAR_TIME);
+    report "QPSK_TEST: [Test 1] Expected response: 'rf_disabled' (check tb.uart0_rx.log)";
+
+    ---------------------------------------------------------------------------
+    -- Test 2: Enable RF
+    -- Expected response: "rf_enabled\n" (11 chars)
+    ---------------------------------------------------------------------------
+    report "QPSK_TEST: [Test 2] Sending 'enable_rf' command...";
+    send_command("enable_rf");
+    wait for CPU_MARGIN + (11 * CHAR_TIME);
+    report "QPSK_TEST: [Test 2] Expected response: 'rf_enabled' (check tb.uart0_rx.log)";
+
+    ---------------------------------------------------------------------------
+    -- Test 3: Capture IQ snapshot
+    -- Expected response: "snapshot_enabled\n" (17 chars) + 4096 bytes IQ data
+    -- Total: 17 + 4096 = 4113 characters
+    -- At 115200 baud: ~357ms for data transfer
+    ---------------------------------------------------------------------------
+    report "QPSK_TEST: [Test 3] Sending 'enable_snapshot' command...";
+    send_command("enable_snapshot");
+    -- Wait for response header + IQ data (4113 bytes at 115200 baud ~ 357ms)
+    wait for CPU_MARGIN + (4113 * CHAR_TIME);
+    report "QPSK_TEST: [Test 3] Expected: 'snapshot_enabled' + 4096 bytes IQ data";
+    report "QPSK_TEST: [Test 3] IQ data captured from BRAM at 0xC0000000";
+
+    ---------------------------------------------------------------------------
+    -- Test 4: Disable RF (cleanup)
+    -- Expected response: "rf_disabled\n" (12 chars)
+    ---------------------------------------------------------------------------
+    report "QPSK_TEST: [Test 4] Sending 'disable_rf' command...";
+    send_command("disable_rf");
+    wait for CPU_MARGIN + (12 * CHAR_TIME);
+    report "QPSK_TEST: [Test 4] Expected response: 'rf_disabled' (check tb.uart0_rx.log)";
+
+    report "QPSK_TEST: ========================================";
+    report "QPSK_TEST: Test Sequence Complete!";
+    report "QPSK_TEST: ========================================";
+    report "QPSK_TEST: Check tb.uart0_rx.log for all UART responses";
+
+    -- Stay idle
+    wait;
+  end process qpsk_test_sequence;
 
 
   -- XBUS / Wishbone Interconnect -----------------------------------------------------------
@@ -421,7 +529,7 @@ begin
     DEV_3_EN => true,         DEV_3_SIZE =>              4, DEV_3_BASE => x"FF000000",
     DEV_4_EN => true,         DEV_4_SIZE =>             16, DEV_4_BASE => x"B0000000",
     DEV_5_EN => true,         DEV_5_SIZE =>             16, DEV_5_BASE => x"FF100000",
-    DEV_6_EN => false,        DEV_6_SIZE =>              0, DEV_6_BASE => (others => '0'), -- unused
+    DEV_6_EN => true,         DEV_6_SIZE =>           8192, DEV_6_BASE => x"C0000000", -- IQ BRAM (8KB)
     DEV_7_EN => false,        DEV_7_SIZE =>              0, DEV_7_BASE => (others => '0')  -- unused
   )
   port map (
@@ -435,7 +543,7 @@ begin
     dev_3_req_o => xbus_trig_req,      dev_3_rsp_i => xbus_trig_rsp,
     dev_4_req_o => xbus_fmem_data_req, dev_4_rsp_i => xbus_fmem_data_rsp,
     dev_5_req_o => xbus_fmem_tag_req,  dev_5_rsp_i => xbus_fmem_tag_rsp,
-    dev_6_req_o => open,               dev_6_rsp_i => xbus_rsp_terminate_c, -- unused
+    dev_6_req_o => xbus_iq_bram_req,   dev_6_rsp_i => xbus_iq_bram_rsp,   -- IQ sample BRAM
     dev_7_req_o => open,               dev_7_rsp_i => xbus_rsp_terminate_c  -- unused
   );
 
@@ -541,6 +649,24 @@ begin
     tag_rsp_o => xbus_fmem_tag_rsp,
     mem_req_i => xbus_fmem_data_req,
     mem_rsp_o => xbus_fmem_data_rsp
+  );
+
+
+  -- XBUS: IQ Sample BRAM (simulates ADC capture buffer) ------------------------------------
+  -- -------------------------------------------------------------------------------------------
+  -- Simulates dual-port BRAM connected via AXI switch in real hardware
+  -- Address range: 0xC0000000 - 0xC0001FFF (8KB)
+  -- Pre-initialized with synthetic QPSK constellation data + noise
+  xbus_iq_bram_inst: entity work.iq_bram
+  generic map (
+    MEM_SIZE => 8192, -- 8KB = 2048 x 32-bit words
+    MEM_LATE => 2     -- simulate AXI switch latency
+  )
+  port map (
+    clk_i      => clk_gen,
+    rstn_i     => rst_gen,
+    xbus_req_i => xbus_iq_bram_req,
+    xbus_rsp_o => xbus_iq_bram_rsp
   );
 
 
