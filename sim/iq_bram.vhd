@@ -91,11 +91,14 @@ architecture iq_bram_rtl of iq_bram is
         when others => i_val := to_signed(0, 16); q_val := to_signed(0, 16);
       end case;
 
-      -- Add AWGN-like noise (+/- 512, ~3% of signal amplitude)
+      -- Add AWGN-like noise (+/- 256, ~1.5% of signal amplitude)
+      -- Use separate LFSR advances for I and Q to decorrelate them
       lfsr := lfsr_next(lfsr);
-      noise_i := resize(signed(lfsr(9 downto 0)) - 512, 16);
+      lfsr := lfsr_next(lfsr);  -- Extra advance to decorrelate from symbol selection
+      noise_i := to_signed(to_integer(unsigned(lfsr(8 downto 0))) - 256, 16);
       lfsr := lfsr_next(lfsr);
-      noise_q := resize(signed(lfsr(9 downto 0)) - 512, 16);
+      lfsr := lfsr_next(lfsr);  -- Extra advance to decorrelate I and Q noise
+      noise_q := to_signed(to_integer(unsigned(lfsr(8 downto 0))) - 256, 16);
 
       i_val := i_val + noise_i;
       q_val := q_val + noise_q;

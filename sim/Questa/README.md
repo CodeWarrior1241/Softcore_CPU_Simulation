@@ -2,10 +2,15 @@
 
 This directory contains scripts for simulating the NEORV32 RISC-V processor using Questa Prime with VHDL-2008.
 
+> **Note:** This simulation is functionally identical to the NVC simulation in `sim/NVC/`. Both use the same testbench and produce the same results. Choose based on your toolchain:
+> - **Questa Prime** - Commercial simulator (requires license)
+> - **NVC** - Free, open-source alternative
+
 ## Prerequisites
 
 - Questa Prime (or ModelSim) with VHDL-2008 support
 - `vsim` command available in PATH
+- Python 3 with matplotlib/numpy (optional, for constellation plots)
 
 ## Changing the Application Program
 
@@ -203,6 +208,111 @@ run 10ms
 ```
 
 **Note:** When using generics, you must run `vsim` manually rather than using the `run_sim` scripts.
+
+## QPSK Simulation Timing
+
+When running the QPSK handler application, sufficient simulation time is needed to transmit all IQ samples over UART. Use the included calculator to determine the minimum required time.
+
+### Timing Calculator
+
+```bash
+python ../calculate_sim_time.py
+```
+
+Output:
+```
+==================================================
+QPSK Simulation Time Calculator
+==================================================
+
+UART Configuration:
+  Baud rate:        115,200 bps
+  Bits per byte:    10 (8N1)
+
+Data Sizes:
+  ASCII responses:  40 bytes
+  IQ data:          4,096 bytes (1024 samples x 4)
+  Total:            4,136 bytes (41,360 bits)
+
+Time Breakdown:
+  UART transmission: 359.0 ms
+  CPU boot:          10 ms
+  Command delays:    30 ms
+  Processing:        20 ms
+  ------------------------------
+  Minimum total:     419 ms
+
+RECOMMENDED: --time 503ms
+==================================================
+```
+
+### Quick Reference
+
+| Samples | IQ Data | UART Time | Recommended |
+|---------|---------|-----------|-------------|
+| 256     | 1 KB    | ~90 ms    | 150 ms      |
+| 512     | 2 KB    | ~180 ms   | 250 ms      |
+| 1024    | 4 KB    | ~360 ms   | **500 ms**  |
+| 2048    | 8 KB    | ~720 ms   | 900 ms      |
+
+The default `--time 150ms` is only sufficient for basic tests. For full QPSK snapshot capture (1024 samples), use:
+
+```bash
+run_sim.bat --time 500ms
+```
+
+### Timing Formula
+
+```
+UART_time = (total_bytes x 10 bits) / baud_rate
+
+For 1024 IQ samples at 115200 baud:
+  = (4136 bytes x 10) / 115200
+  = 359 ms
+
+Add ~60ms overhead for CPU boot, command processing, and testbench delays.
+Total minimum: ~420 ms
+With 20% safety margin: ~500 ms
+```
+
+## QPSK Constellation Display
+
+After simulation, the run scripts automatically generate a QPSK constellation plot from the captured IQ data (requires Python with matplotlib/numpy).
+
+### Manual Usage
+
+```bash
+python ../display_qpsk_constellation.py [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--save FILE` | Save plot to PNG file |
+| `--no-display` | Don't show interactive window |
+| `--filter` | Remove outlier samples |
+
+### Examples
+
+Display constellation interactively:
+```bash
+python ../display_qpsk_constellation.py
+```
+
+Save to file without display:
+```bash
+python ../display_qpsk_constellation.py --save qpsk.png --no-display
+```
+
+Filter outliers for cleaner plot:
+```bash
+python ../display_qpsk_constellation.py --save qpsk.png --filter
+```
+
+### Requirements
+
+```bash
+pip install matplotlib numpy
+```
 
 ## Troubleshooting
 

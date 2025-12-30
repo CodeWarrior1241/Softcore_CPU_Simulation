@@ -96,4 +96,26 @@ if "%SIM_MODE%"=="batch" (
     %VSIM% -do "set SIM_TIME {%SIM_TIME%}; do simulate.do"
 )
 
+echo.
+echo ==========================================
+echo Simulation complete!
+echo ==========================================
+
+REM Display QPSK constellation if Python is available and log file exists
+if exist tb.uart0_rx.log (
+    where python >nul 2>&1
+    if not errorlevel 1 (
+        echo.
+        echo Generating QPSK constellation plot...
+        echo ==========================================
+        python ..\display_qpsk_constellation.py --save qpsk_constellation.png --no-display
+        if not errorlevel 1 (
+            echo Constellation saved to: qpsk_constellation.png
+        ) else (
+            echo Note: Could not generate constellation plot
+            echo       Install matplotlib/numpy: pip install matplotlib numpy
+        )
+    )
+)
+
 endlocal
