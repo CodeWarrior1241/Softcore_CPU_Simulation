@@ -43,9 +43,16 @@ def parse_iq_data(filepath):
     with open(filepath, 'rb') as f:
         data = f.read()
 
-    # Find the "snapshot_enabled\n" marker
-    marker = b'snapshot_enabled\n'
-    marker_pos = data.find(marker)
+    # Find the "snapshot_enabled" marker (handle both \n and \r\n line endings)
+    marker_lf = b'snapshot_enabled\n'
+    marker_crlf = b'snapshot_enabled\r\n'
+
+    marker_pos = data.find(marker_crlf)
+    if marker_pos != -1:
+        marker = marker_crlf
+    else:
+        marker_pos = data.find(marker_lf)
+        marker = marker_lf
 
     if marker_pos == -1:
         print("Error: 'snapshot_enabled' marker not found in log file")
