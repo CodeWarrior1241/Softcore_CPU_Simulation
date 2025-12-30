@@ -48,12 +48,13 @@ architecture iq_bram_rtl of iq_bram is
   -- Memory type
   type mem_t is array (0 to NUM_WORDS-1) of std_ulogic_vector(31 downto 0);
 
-  -- LFSR for pseudo-random noise generation (compile-time)
+  -- 32-bit LFSR for pseudo-random noise generation (compile-time)
+  -- Uses maximal-length polynomial: x^32 + x^22 + x^2 + x + 1
   function lfsr_next(lfsr : unsigned) return unsigned is
     variable fb : std_ulogic;
   begin
-    fb := lfsr(15) xor lfsr(13) xor lfsr(12) xor lfsr(10);
-    return lfsr(14 downto 0) & fb;
+    fb := lfsr(31) xor lfsr(21) xor lfsr(1) xor lfsr(0);
+    return lfsr(30 downto 0) & fb;
   end function;
 
   -- Initialize memory with synthetic QPSK data
@@ -61,7 +62,7 @@ architecture iq_bram_rtl of iq_bram is
   -- QPSK constellation at +/- 16384 (50% of full scale)
   function init_iq_memory return mem_t is
     variable mem      : mem_t;
-    variable lfsr     : unsigned(15 downto 0) := x"ACE1";
+    variable lfsr     : unsigned(31 downto 0) := x"DEADBEEF";
     variable symbol   : integer;
     variable i_val    : signed(15 downto 0);
     variable q_val    : signed(15 downto 0);
@@ -92,13 +93,10 @@ architecture iq_bram_rtl of iq_bram is
       end case;
 
       -- Add AWGN-like noise (+/- 256, ~1.5% of signal amplitude)
-      -- Use separate LFSR advances for I and Q to decorrelate them
+      -- Use different bit ranges from 32-bit LFSR for I and Q to decorrelate
       lfsr := lfsr_next(lfsr);
-      lfsr := lfsr_next(lfsr);  -- Extra advance to decorrelate from symbol selection
       noise_i := to_signed(to_integer(unsigned(lfsr(8 downto 0))) - 256, 16);
-      lfsr := lfsr_next(lfsr);
-      lfsr := lfsr_next(lfsr);  -- Extra advance to decorrelate I and Q noise
-      noise_q := to_signed(to_integer(unsigned(lfsr(8 downto 0))) - 256, 16);
+      noise_q := to_signed(to_integer(unsigned(lfsr(24 downto 16))) - 256, 16);
 
       i_val := i_val + noise_i;
       q_val := q_val + noise_q;
