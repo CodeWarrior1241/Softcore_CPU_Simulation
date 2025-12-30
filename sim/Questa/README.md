@@ -62,7 +62,8 @@ See `sw/example/` for more programs.
 
 ### Windows
 ```batch
-run_sim.bat
+run_sim.bat --clean
+run_sim.bat --time 500ms
 ```
 
 ### Linux/Unix
@@ -314,11 +315,47 @@ python ../display_qpsk_constellation.py --save qpsk.png --filter
 pip install matplotlib numpy
 ```
 
+## Simulation Workflow
+
+The scripts perform two phases:
+
+1. **Compile** (`compile.do`) - Compile all VHDL source files in dependency order into the work library
+2. **Simulate** (`simulate.do`) - Load the design, configure waveforms, and run simulation
+
+## Directory Structure
+
+```
+sim/Questa/
+├── README.md       # This file
+├── compile.do      # VHDL compilation script
+├── simulate.do     # Simulation launch script
+├── wave.do         # Custom waveform configuration
+├── run_sim.bat     # Windows simulation script
+├── run_sim.sh      # Unix/Linux/macOS simulation script
+└── work/           # Generated - Questa work library (git-ignored)
+
+sim/                # Parent directory (shared scripts)
+├── calculate_sim_time.py           # QPSK simulation timing calculator
+├── display_qpsk_constellation.py   # QPSK constellation plot generator
+└── ...
+```
+
+## About Questa
+
+Questa Prime is a commercial VHDL/Verilog simulator from Siemens EDA (formerly Mentor Graphics) that:
+
+- Supports VHDL-1993, VHDL-2002, VHDL-2008, and SystemVerilog
+- Provides advanced debugging with integrated waveform viewer
+- Offers high-performance simulation with optimizations
+- Includes code coverage and assertion-based verification
+
+For more information, visit: https://eda.sw.siemens.com/en-US/ic/questa/
+
 ## Troubleshooting
 
 ### Compilation Errors
 - Ensure Questa Prime supports VHDL-2008
-- Check that all paths are correct (relative to `sim/questa/` directory)
+- Check that all paths are correct (relative to `sim/Questa/` directory)
 
 ### Simulation Issues
 - Verify that the neorv32 library is properly mapped

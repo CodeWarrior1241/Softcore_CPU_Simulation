@@ -50,7 +50,7 @@ The simulator must re-analyze the updated VHDL file:
 ```batch
 cd sim\NVC
 run_sim.bat --clean
-run_sim.bat --time 10ms
+run_sim.bat --time 500ms
 ```
 
 ### Available Example Programs
@@ -244,7 +244,7 @@ After simulation, the run scripts automatically generate a QPSK constellation pl
 ### Manual Usage
 
 ```bash
-python display_qpsk_constellation.py [options]
+python ../display_qpsk_constellation.py [options]
 ```
 
 | Option | Description |
