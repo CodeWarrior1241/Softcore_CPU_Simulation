@@ -74,6 +74,7 @@ if "%~1"=="--clean" (
     if exist *.fst del /q *.fst
     if exist *.log del /q *.log
     if exist *.cf del /q *.cf
+    if exist *.png del /q *.png
     if exist neorv32.tracer*.log del /q neorv32.tracer*.log
     if exist tb.uart*.log del /q tb.uart*.log
     echo Done.
@@ -206,10 +207,30 @@ echo Simulation complete!
 echo Wall clock time: %ELAPSED_S% seconds
 if defined WAVE_FILE (
     echo Waveform saved to: %WAVE_FILE%
+)
+echo ==========================================
+
+REM Display QPSK constellation if Python is available and log file exists
+if exist tb.uart0_rx.log (
+    where python >nul 2>&1
+    if not errorlevel 1 (
+        echo.
+        echo [4/4] Generating QPSK constellation plot...
+        echo ==========================================
+        python ..\display_qpsk_constellation.py --save qpsk_constellation.png --no-display
+        if not errorlevel 1 (
+            echo Constellation saved to: qpsk_constellation.png
+        ) else (
+            echo Note: Could not generate constellation plot
+            echo       Install matplotlib/numpy: pip install matplotlib numpy
+        )
+    )
+)
+
+if defined WAVE_FILE (
     echo.
     echo To view waveforms, run: gtkwave %WAVE_FILE%
 )
-echo ==========================================
 
 exit /b 0
 

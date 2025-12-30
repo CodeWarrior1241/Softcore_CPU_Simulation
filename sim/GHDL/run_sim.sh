@@ -65,7 +65,7 @@ while [[ $# -gt 0 ]]; do
         --clean)
             echo "Cleaning work directory and simulation artifacts..."
             rm -rf "$WORK_DIR"
-            rm -f *.vcd *.ghw *.fst *.log *.cf neorv32.tracer*.log tb.uart*.log
+            rm -f *.vcd *.ghw *.fst *.log *.cf *.png neorv32.tracer*.log tb.uart*.log
             echo "Done."
             exit 0
             ;;
@@ -192,7 +192,26 @@ echo "Simulation complete!"
 echo "Wall clock time: ${ELAPSED_SEC} seconds"
 if [[ -n "$WAVE_FILE" ]]; then
     echo "Waveform saved to: $WAVE_FILE"
+fi
+echo "=========================================="
+
+# Display QPSK constellation if Python is available and log file exists
+if [ -f "tb.uart0_rx.log" ]; then
+    if command -v python3 &> /dev/null || command -v python &> /dev/null; then
+        echo ""
+        echo "[4/4] Generating QPSK constellation plot..."
+        echo "=========================================="
+        PYTHON_CMD=$(command -v python3 || command -v python)
+        if $PYTHON_CMD ../display_qpsk_constellation.py --save qpsk_constellation.png --no-display 2>/dev/null; then
+            echo "Constellation saved to: qpsk_constellation.png"
+        else
+            echo "Note: Could not generate constellation plot"
+            echo "      Install matplotlib/numpy: pip install matplotlib numpy"
+        fi
+    fi
+fi
+
+if [[ -n "$WAVE_FILE" ]]; then
     echo ""
     echo "To view waveforms, run: gtkwave $WAVE_FILE"
 fi
-echo "=========================================="
