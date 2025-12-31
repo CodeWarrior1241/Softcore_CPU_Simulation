@@ -27,10 +27,16 @@ architecture sim of vivado_tb is
   -- Clock period for 300 MHz differential clock
   constant CLK_PERIOD : time := (1.0e9 / CLOCK_FREQUENCY) * 1 ns; -- ~3.333 ns
 
+  -- CPU clock frequency (100 MHz from PLL)
+  constant CPU_CLOCK_FREQUENCY : real := 100.0e6;
+
   -- Clock and reset signals
   signal clk_p     : std_logic := '0';
   signal clk_n     : std_logic := '1';
   signal rst_n     : std_logic := '0';
+
+  -- Internal CPU clock (from PLL output, directly accessed via hierarchy)
+  alias cpu_clk : std_logic is <<signal .vivado_tb.uut.Top_i.ECS_Clock_300MHz_clk_out1 : std_logic>>;
 
   -- UART signals
   signal uart_txd  : std_logic;
@@ -77,16 +83,16 @@ begin
   -- ============================================================================
   -- UART Receiver (logs to console and file)
   -- ============================================================================
-  -- Note: The clock for UART receiver should match the CPU clock (100 MHz after PLL)
-  -- The PLL divides 300 MHz down to 100 MHz for the CPU
+  -- Note: The UART receiver must be clocked by the same clock as the UART transmitter
+  -- The NEORV32 UART runs at 100 MHz (PLL output), so we use the internal cpu_clk
   sim_rx_uart0: entity work.sim_uart_rx
     generic map (
       NAME => UART_LOG_PATH,  -- Full path to log file (without .log extension)
-      FCLK => 100.0e6,        -- CPU runs at 100 MHz (300 MHz / 3)
+      FCLK => CPU_CLOCK_FREQUENCY, -- Must match cpu_clk frequency (100 MHz)
       BAUD => BAUD_RATE
     )
     port map (
-      clk => clk_p,
+      clk => cpu_clk,
       rxd => uart_txd
     );
 
