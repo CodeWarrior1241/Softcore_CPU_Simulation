@@ -73,7 +73,7 @@ setups/vivado/sim/libraries
 setups/vivado/sim/modelsim.ini
 setups/vivado/sim/transcript
 setups/vivado/sim/*.wlf
-setups/vivado/sim/elaborate.log
+setups/vivado/sim/*.log
 
 # Keep the QPSK COE file (exception to *.coe rule)
 !setups/vivado/sim/qpsk_bram_init.coe

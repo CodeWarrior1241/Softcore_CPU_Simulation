@@ -6,7 +6,26 @@ This directory contains simulation scripts for running the Vivado block design t
 
 - **Vivado 2025.2** (or compatible version) - For block design IP generation
 - **Questa Prime** - Intel/Siemens FPGA simulation tool
+- **Pre-compiled Xilinx simulation libraries** - See [Questa Library Requirements](#questa-library-requirements)
 - **Python 3** with matplotlib/numpy (optional) - For constellation plotting
+
+### Library Symlink Setup (One-Time)
+
+After running `compile_simlib`, create a junction/symlink from `sim/libraries` to your compiled libraries directory:
+
+**Windows (run as Administrator or with Developer Mode enabled):**
+```batch
+cd setups\vivado\sim
+mklink /J libraries C:\Work\Questa_Libraries_Vivado
+```
+
+**Linux/macOS:**
+```bash
+cd setups/vivado/sim
+ln -s /path/to/questa_libraries libraries
+```
+
+This symlink is required because the `modelsim.ini` from `compile_simlib` references library paths relative to this location.
 
 ## Directory Structure
 
@@ -153,17 +172,13 @@ This takes 15-30 minutes and creates libraries in the specified directory.
 
 ### Library Configuration
 
-The `compile.do` script expects libraries at `C:/Work/Questa_Libraries_Vivado`. If you used a different path, update the `XILINX_QUESTA_LIBS` variable in `compile.do`:
+If you used a different library path than `C:/Work/Questa_Libraries_Vivado`, update the `XILINX_QUESTA_LIBS` variable in `compile.do`:
 
 ```tcl
 set XILINX_QUESTA_LIBS "C:/Work/Questa_Libraries_Vivado"
 ```
 
-A symbolic link (`libraries`) is created in the `sim/` directory pointing to the pre-compiled libraries:
-
-```
-sim/libraries -> C:/Work/Questa_Libraries_Vivado
-```
+Also update the `sim/libraries` symlink to point to your library location (see [Library Symlink Setup](#library-symlink-setup-one-time)).
 
 ### Required Libraries
 

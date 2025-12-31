@@ -15,7 +15,10 @@ entity vivado_tb is
     CLOCK_FREQUENCY : real := 300.0e6;  -- 300 MHz differential clock input
     BAUD_RATE       : real := 115200.0; -- UART baud rate
     -- Simulation control
-    RESET_TIME_NS   : natural := 100    -- Reset duration in nanoseconds
+    RESET_TIME_NS   : natural := 100;   -- Reset duration in nanoseconds
+    -- Log file path (without .log extension)
+    -- Path is relative to simulation working directory (vivado questa dir)
+    UART_LOG_PATH   : string := "../../../../sim/tb.uart0_rx"
   );
 end entity vivado_tb;
 
@@ -78,8 +81,8 @@ begin
   -- The PLL divides 300 MHz down to 100 MHz for the CPU
   sim_rx_uart0: entity work.sim_uart_rx
     generic map (
-      NAME => "tb.uart0_rx",
-      FCLK => 100.0e6,  -- CPU runs at 100 MHz (300 MHz / 3)
+      NAME => UART_LOG_PATH,  -- Full path to log file (without .log extension)
+      FCLK => 100.0e6,        -- CPU runs at 100 MHz (300 MHz / 3)
       BAUD => BAUD_RATE
     )
     port map (
