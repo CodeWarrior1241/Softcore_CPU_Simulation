@@ -80,31 +80,42 @@ echo "=========================================="
 # Clean up previous simulation logs
 rm -f tb.uart*.log
 
+# The UART log file is written to the Vivado questa directory during simulation
+QUESTA_DIR="../NEORV32_Simulation.ip_user_files/sim_scripts/questa"
+LOG_FILE="$QUESTA_DIR/tb.uart0_rx.log"
+
 if [[ "$SIM_MODE" == "batch" ]]; then
     echo "Running in batch mode..."
     $VSIM -c -do "set SIM_TIME {$SIM_TIME}; do simulate.do; quit -f"
+
+    echo ""
+    echo "=========================================="
+    echo "Simulation complete!"
+    echo "=========================================="
+
+    # Display QPSK constellation if Python is available and log file exists
+    if [ -f "$LOG_FILE" ]; then
+        if command -v python3 &> /dev/null || command -v python &> /dev/null; then
+            echo ""
+            echo "Generating QPSK constellation plot..."
+            echo "=========================================="
+            PYTHON_CMD=$(command -v python3 || command -v python)
+            if $PYTHON_CMD ../../../sim/display_qpsk_constellation.py "$LOG_FILE" --save qpsk_constellation.png --no-display 2>/dev/null; then
+                echo "Constellation saved to: qpsk_constellation.png"
+            else
+                echo "Note: Could not generate constellation plot"
+                echo "      Install matplotlib/numpy: pip install matplotlib numpy"
+            fi
+        fi
+    else
+        echo "Note: UART log file not found at $LOG_FILE"
+        echo "      The simulation may not have completed the snapshot capture."
+    fi
 else
     echo "Running in GUI mode..."
+    echo ""
+    echo "NOTE: In GUI mode, run the constellation plot manually after simulation completes:"
+    echo "      python ../../../sim/display_qpsk_constellation.py \"$LOG_FILE\" --save qpsk_constellation.png"
+    echo ""
     $VSIM -do "set SIM_TIME {$SIM_TIME}; do simulate.do"
-fi
-
-echo ""
-echo "=========================================="
-echo "Simulation complete!"
-echo "=========================================="
-
-# Display QPSK constellation if Python is available and log file exists
-if [ -f "tb.uart0_rx.log" ]; then
-    if command -v python3 &> /dev/null || command -v python &> /dev/null; then
-        echo ""
-        echo "Generating QPSK constellation plot..."
-        echo "=========================================="
-        PYTHON_CMD=$(command -v python3 || command -v python)
-        if $PYTHON_CMD ../../../sim/display_qpsk_constellation.py --save qpsk_constellation.png --no-display 2>/dev/null; then
-            echo "Constellation saved to: qpsk_constellation.png"
-        else
-            echo "Note: Could not generate constellation plot"
-            echo "      Install matplotlib/numpy: pip install matplotlib numpy"
-        fi
-    fi
 fi

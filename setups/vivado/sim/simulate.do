@@ -85,10 +85,20 @@ add wave -divider "Clock & Reset"
 add wave -hex /vivado_tb/clk_p
 add wave -hex /vivado_tb/clk_n
 add wave -hex /vivado_tb/rst_n
+add wave -hex /vivado_tb/cpu_clk
+add wave -hex /vivado_tb/cpu_clk_locked
 
-add wave -divider "UART"
+add wave -divider "UART Signals"
 add wave -hex /vivado_tb/uart_txd
+add wave -hex /vivado_tb/uart_txd_gated
 add wave -hex /vivado_tb/uart_rxd
+
+add wave -divider "UART TX Control (Testbench -> CPU)"
+add wave -hex /vivado_tb/tx_data
+add wave -hex /vivado_tb/tx_valid
+add wave -hex /vivado_tb/tx_ready
+add wave      /vivado_tb/cmd_state
+add wave -unsigned /vivado_tb/qpsk_count
 
 add wave -divider "UUT Internal - Clock Wizard"
 catch {

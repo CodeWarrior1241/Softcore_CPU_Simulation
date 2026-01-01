@@ -87,34 +87,45 @@ echo ==========================================
 REM Clean up previous simulation logs
 if exist tb.uart*.log del /q tb.uart*.log
 
+REM The UART log file is written to the Vivado questa directory during simulation
+set QUESTA_DIR=..\NEORV32_Simulation.ip_user_files\sim_scripts\questa
+set LOG_FILE=%QUESTA_DIR%\tb.uart0_rx.log
+
 if "%SIM_MODE%"=="batch" (
     echo Running in batch mode...
     %VSIM% -c -do "set SIM_TIME {%SIM_TIME%}; do simulate.do; quit -f"
+
+    echo.
+    echo ==========================================
+    echo Simulation complete!
+    echo ==========================================
+
+    REM Display QPSK constellation if Python is available and log file exists
+    if exist "%LOG_FILE%" (
+        where python >nul 2>&1
+        if not errorlevel 1 (
+            echo.
+            echo Generating QPSK constellation plot...
+            echo ==========================================
+            python ..\..\..\sim\display_qpsk_constellation.py "%LOG_FILE%" --save qpsk_constellation.png --no-display
+            if not errorlevel 1 (
+                echo Constellation saved to: qpsk_constellation.png
+            ) else (
+                echo Note: Could not generate constellation plot
+                echo       Install matplotlib/numpy: pip install matplotlib numpy
+            )
+        )
+    ) else (
+        echo Note: UART log file not found at %LOG_FILE%
+        echo       The simulation may not have completed the snapshot capture.
+    )
 ) else (
     echo Running in GUI mode...
+    echo.
+    echo NOTE: In GUI mode, run the constellation plot manually after simulation completes:
+    echo       python ..\..\..\sim\display_qpsk_constellation.py "%LOG_FILE%" --save qpsk_constellation.png
+    echo.
     %VSIM% -do "set SIM_TIME {%SIM_TIME%}; do simulate.do"
-)
-
-echo.
-echo ==========================================
-echo Simulation complete!
-echo ==========================================
-
-REM Display QPSK constellation if Python is available and log file exists
-if exist tb.uart0_rx.log (
-    where python >nul 2>&1
-    if not errorlevel 1 (
-        echo.
-        echo Generating QPSK constellation plot...
-        echo ==========================================
-        python ..\..\..\sim\display_qpsk_constellation.py --save qpsk_constellation.png --no-display
-        if not errorlevel 1 (
-            echo Constellation saved to: qpsk_constellation.png
-        ) else (
-            echo Note: Could not generate constellation plot
-            echo       Install matplotlib/numpy: pip install matplotlib numpy
-        )
-    )
 )
 
 endlocal

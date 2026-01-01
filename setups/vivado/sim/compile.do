@@ -11,7 +11,7 @@ quit -sim
 set sim_dir [pwd]
 
 # Path to Vivado-generated Questa scripts (relative to sim directory)
-set vivado_questa_dir "$sim_dir/../NEORV32_Simulation.ip_user_files/sim_scripts/Top/questa"
+set vivado_questa_dir "$sim_dir/../NEORV32_Simulation.ip_user_files/sim_scripts/questa"
 
 # ================================================================================
 # Pre-compiled Xilinx Simulation Libraries (from compile_simlib)
@@ -40,6 +40,11 @@ puts "=========================================="
 puts "Running Vivado-generated compile script..."
 puts "=========================================="
 
+# Vivado's compile.do expects bin_path to point to the Questa bin directory
+# It uses commands like: $bin_path/vlib, $bin_path/vcom, etc.
+# We need to find where Questa is installed
+set bin_path [file dirname [exec which vsim]]
+
 do compile.do
 
 # Return to our sim directory
@@ -57,13 +62,16 @@ puts "=========================================="
 vmap xil_defaultlib $vivado_questa_dir/questa_lib/msim/xil_defaultlib
 vmap neorv32 $vivado_questa_dir/questa_lib/msim/neorv32
 
-# Compile UART receiver (needs VHDL-2008 for math_real)
+# Compile UART components (need VHDL-2008 for math_real)
 set VCOM_TB_OPTS "-2008 -explicit -work xil_defaultlib"
 
-# Simulation UART receiver from the main sim directory
+# Simulation UART receiver and transmitter from the main sim directory
 vcom {*}$VCOM_TB_OPTS $sim_dir/../../../sim/sim_uart_rx.vhd
+vcom {*}$VCOM_TB_OPTS $sim_dir/../../../sim/sim_uart_tx.vhd
 
-# Block design top wrapper (make sure it's in xil_defaultlib)
+# Block design entity and wrapper (recompile to pick up any port changes like sim_clock_100MHz)
+# Top.vhd must be compiled before Top_wrapper.vhd since wrapper depends on entity
+vcom {*}$VCOM_TB_OPTS $sim_dir/../NEORV32_Simulation.gen/sources_1/bd/Top/sim/Top.vhd
 vcom {*}$VCOM_TB_OPTS $sim_dir/../NEORV32_Simulation.gen/sources_1/bd/Top/hdl/Top_wrapper.vhd
 
 # Our custom testbench

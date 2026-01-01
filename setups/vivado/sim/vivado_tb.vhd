@@ -2,7 +2,12 @@
 -- Vivado Block Design Testbench for NEORV32 RISC-V Processor                       --
 -- -------------------------------------------------------------------------------- --
 -- This testbench instantiates the Top_wrapper from the Vivado block design and    --
--- provides clock generation, reset, and UART monitoring for simulation.            --
+-- provides clock generation, reset, UART command generation, and UART monitoring. --
+--                                                                                  --
+-- UART Command Protocol (matching MATLAB QPSK_GUI):                                --
+--   "enable_rf\n"       -> Response: "rf_enabled\n"                                --
+--   "disable_rf\n"      -> Response: "rf_disabled\n"                               --
+--   "enable_snapshot\n" -> Response: "snapshot_enabled\n" + 4096 bytes IQ data     --
 -- ================================================================================ --
 
 library ieee;
@@ -13,12 +18,13 @@ entity vivado_tb is
   generic (
     -- Clock and timing
     CLOCK_FREQUENCY : real := 300.0e6;  -- 300 MHz differential clock input
-    BAUD_RATE       : real := 115200.0; -- UART baud rate
+    BAUD_RATE       : real := 115200.0; -- UART baud rate (matches qpsk_handler application)
     -- Simulation control
     RESET_TIME_NS   : natural := 100;   -- Reset duration in nanoseconds
+    BOOT_DELAY_MS   : natural := 10;    -- Wait time after reset before sending commands (ms)
     -- Log file path (without .log extension)
     -- Path is relative to simulation working directory (vivado questa dir)
-    UART_LOG_PATH   : string := "../../../../sim/tb.uart0_rx"
+    UART_LOG_PATH   : string := "tb.uart0_rx"
   );
 end entity vivado_tb;
 
@@ -28,19 +34,86 @@ architecture sim of vivado_tb is
   constant CLK_PERIOD : time := (1.0e9 / CLOCK_FREQUENCY) * 1 ns; -- ~3.333 ns
 
   -- CPU clock frequency (100 MHz from PLL)
+  -- The NEORV32 runs at 100 MHz, and its UART baud rate is calculated from this
   constant CPU_CLOCK_FREQUENCY : real := 100.0e6;
+
+  -- Boot delay in CPU clock cycles
+  constant BOOT_DELAY_CYCLES : natural := natural(CPU_CLOCK_FREQUENCY * real(BOOT_DELAY_MS) / 1000.0);
 
   -- Clock and reset signals
   signal clk_p     : std_logic := '0';
   signal clk_n     : std_logic := '1';
   signal rst_n     : std_logic := '0';
 
-  -- Internal CPU clock (from PLL output, directly accessed via hierarchy)
-  alias cpu_clk : std_logic is <<signal .vivado_tb.uut.Top_i.ECS_Clock_300MHz_clk_out1 : std_logic>>;
+  -- CPU clock from block design (directly exposed for simulation)
+  signal cpu_clk        : std_logic;
+  signal cpu_clk_locked : std_logic;
 
   -- UART signals
   signal uart_txd  : std_logic;
-  signal uart_rxd  : std_logic := '1'; -- Idle high
+  signal uart_rxd  : std_logic := '1'; -- Directly driven by sim_uart_tx
+
+  -- Gated UART RX signal - mask until PLL is locked
+  signal uart_txd_gated : std_logic := '1';
+
+  -- UART TX control signals (from command sequencer to sim_uart_tx)
+  signal tx_data   : std_ulogic_vector(7 downto 0) := (others => '0');
+  signal tx_valid  : std_ulogic := '0';
+  signal tx_ready  : std_ulogic;
+
+  -- Command sequencer state
+  type cmd_state_t is (WAIT_BOOT,
+                       SEND_ENABLE_RF, WAIT_ENABLE_RF_BYTE,
+                       WAIT_RF_RESPONSE,
+                       SEND_SNAPSHOT, WAIT_SNAPSHOT_BYTE,
+                       WAIT_SNAPSHOT_RESPONSE, DONE);
+  signal cmd_state : cmd_state_t := WAIT_BOOT;
+  signal boot_counter : natural := 0;
+  signal char_index : natural := 0;
+  signal inter_cmd_delay : natural := 0;
+
+  -- QPSK progress counter (0..1023) - estimates IQ words received during snapshot
+  -- Each IQ word = 4 bytes, each byte takes CHAR_TIME_CYCLES to transmit
+  -- After the 18-char "snapshot_enabled\r\n" header, IQ data begins
+  signal qpsk_count : natural range 0 to 1023 := 0;
+
+  -- Command strings (as arrays of bytes)
+  -- "enable_rf" + LF
+  type cmd_enable_rf_t is array (0 to 9) of std_ulogic_vector(7 downto 0);
+  constant CMD_ENABLE_RF : cmd_enable_rf_t := (
+    x"65", x"6E", x"61", x"62", x"6C", x"65", x"5F", x"72", x"66", x"0A"  -- "enable_rf\n"
+  );
+
+  -- "disable_rf" + LF
+  type cmd_disable_rf_t is array (0 to 10) of std_ulogic_vector(7 downto 0);
+  constant CMD_DISABLE_RF : cmd_disable_rf_t := (
+    x"64", x"69", x"73", x"61", x"62", x"6C", x"65", x"5F", x"72", x"66", x"0A"  -- "disable_rf\n"
+  );
+
+  -- "enable_snapshot" + LF
+  type cmd_snapshot_t is array (0 to 15) of std_ulogic_vector(7 downto 0);
+  constant CMD_SNAPSHOT : cmd_snapshot_t := (
+    x"65", x"6E", x"61", x"62", x"6C", x"65", x"5F",  -- "enable_"
+    x"73", x"6E", x"61", x"70", x"73", x"68", x"6F", x"74", x"0A"  -- "snapshot\n"
+  );
+
+  -- Timing constants (matching neorv32_tb.vhd approach)
+  -- At 115200 baud: ~86.8us per character (10 bits per char)
+  -- Add margin for CPU processing time
+  constant CHAR_TIME_CYCLES : natural := natural(CPU_CLOCK_FREQUENCY / BAUD_RATE * 10.0); -- cycles per UART char
+  constant CPU_MARGIN_CYCLES : natural := natural(CPU_CLOCK_FREQUENCY * 0.005); -- 5ms CPU processing margin
+
+  -- Response wait times (in CPU clock cycles)
+  -- enable_rf response: "rf_enabled\r\n" = 12 chars
+  constant RF_RESPONSE_CYCLES : natural := CPU_MARGIN_CYCLES + (12 * CHAR_TIME_CYCLES);
+  -- enable_snapshot response: "snapshot_enabled\r\n" (18 chars) + 4096 bytes IQ data = 4114 chars
+  constant SNAPSHOT_RESPONSE_CYCLES : natural := CPU_MARGIN_CYCLES + (4114 * CHAR_TIME_CYCLES);
+
+  -- Timing for QPSK progress counter
+  -- Header: CPU margin + 18 chars for "snapshot_enabled\r\n"
+  constant SNAPSHOT_HEADER_CYCLES : natural := CPU_MARGIN_CYCLES + (18 * CHAR_TIME_CYCLES);
+  -- Each IQ word = 4 bytes = 4 * CHAR_TIME_CYCLES
+  constant IQ_WORD_CYCLES : natural := 4 * CHAR_TIME_CYCLES;
 
 begin
 
@@ -69,15 +142,26 @@ begin
   end process rst_gen;
 
   -- ============================================================================
+  -- UART RX Gating - Only pass through uart_txd after PLL is locked and stable
+  -- ============================================================================
+  -- Gate the UART TX signal to prevent false start bit detection during:
+  -- 1. PLL lock-up period (cpu_clk_locked = '0')
+  -- 2. Undefined signal states ('U', 'X', etc.)
+  -- Force idle high ('1') when not valid
+  uart_txd_gated <= uart_txd when (cpu_clk_locked = '1' and (uart_txd = '0' or uart_txd = '1')) else '1';
+
+  -- ============================================================================
   -- Device Under Test: Top_wrapper (Vivado Block Design)
   -- ============================================================================
   uut: entity work.Top_wrapper
     port map (
-      ecs_clk_in_clk_p => clk_p,
-      ecs_clk_in_clk_n => clk_n,
-      system_resetn    => rst_n,
-      uart0_rxd        => uart_rxd,
-      uart0_txd        => uart_txd
+      ecs_clk_in_clk_p        => clk_p,
+      ecs_clk_in_clk_n        => clk_n,
+      system_resetn           => rst_n,
+      sim_clock_100MHz        => cpu_clk,         -- 100 MHz clock for UART receiver
+      sim_clock_100MHz_locked => cpu_clk_locked,  -- PLL locked indicator
+      uart0_rxd               => uart_rxd,
+      uart0_txd               => uart_txd
     );
 
   -- ============================================================================
@@ -93,7 +177,168 @@ begin
     )
     port map (
       clk => cpu_clk,
-      rxd => uart_txd
+      rxd => uart_txd_gated  -- Use gated signal to avoid false starts during PLL glitch
     );
+
+  -- ============================================================================
+  -- UART Transmitter (sends commands to CPU)
+  -- ============================================================================
+  -- Sends test commands to exercise the qpsk_handler UART interface
+  sim_tx_uart0: entity work.sim_uart_tx
+    generic map (
+      NAME => "tb.uart0_tx",
+      FCLK => CPU_CLOCK_FREQUENCY,
+      BAUD => BAUD_RATE
+    )
+    port map (
+      clk      => cpu_clk,
+      rstn     => cpu_clk_locked,  -- Hold in reset until PLL locked
+      txd      => uart_rxd,        -- Connect to CPU's RX input
+      tx_data  => tx_data,
+      tx_valid => tx_valid,
+      tx_ready => tx_ready
+    );
+
+  -- ============================================================================
+  -- Command Sequencer - Sends UART commands matching MATLAB QPSK_GUI protocol
+  -- ============================================================================
+  -- Sequence:
+  --   1. Wait for CPU to boot (BOOT_DELAY_MS after PLL lock)
+  --   2. Send "enable_rf\n" command
+  --   3. Wait for response
+  --   4. Send "enable_snapshot\n" command
+  --   5. Wait for response (including 4096 bytes of IQ data)
+  --   6. Done
+  cmd_sequencer: process(cpu_clk, cpu_clk_locked)
+  begin
+    if cpu_clk_locked = '0' then
+      cmd_state <= WAIT_BOOT;
+      boot_counter <= 0;
+      char_index <= 0;
+      inter_cmd_delay <= 0;
+      tx_valid <= '0';
+      tx_data <= (others => '0');
+    elsif rising_edge(cpu_clk) then
+      -- Default: no new data
+      tx_valid <= '0';
+
+      case cmd_state is
+
+        -- ====================================================================
+        -- Wait for CPU to boot and initialize
+        -- ====================================================================
+        when WAIT_BOOT =>
+          if boot_counter >= BOOT_DELAY_CYCLES then
+            cmd_state <= SEND_ENABLE_RF;
+            char_index <= 0;
+            report "TB: Starting UART command sequence - sending 'enable_rf'";
+          else
+            boot_counter <= boot_counter + 1;
+          end if;
+
+        -- ====================================================================
+        -- Send "enable_rf\n" command - initiate byte transfer
+        -- ====================================================================
+        when SEND_ENABLE_RF =>
+          if tx_ready = '1' then
+            if char_index <= CMD_ENABLE_RF'high then
+              tx_data <= CMD_ENABLE_RF(char_index);
+              tx_valid <= '1';
+              cmd_state <= WAIT_ENABLE_RF_BYTE;  -- Wait for byte to be accepted
+            else
+              -- All characters sent, wait for response
+              cmd_state <= WAIT_RF_RESPONSE;
+              inter_cmd_delay <= 0;
+              report "TB: 'enable_rf' command sent, waiting for response";
+            end if;
+          end if;
+
+        -- ====================================================================
+        -- Wait for current byte to be accepted by UART TX
+        -- ====================================================================
+        when WAIT_ENABLE_RF_BYTE =>
+          tx_valid <= '0';  -- Clear valid after one cycle
+          if tx_ready = '0' then
+            -- Byte accepted, wait for TX to become ready again
+            null;
+          elsif tx_ready = '1' then
+            -- TX is ready for next byte
+            char_index <= char_index + 1;
+            cmd_state <= SEND_ENABLE_RF;
+          end if;
+
+        -- ====================================================================
+        -- Wait for RF response before sending next command
+        -- ====================================================================
+        when WAIT_RF_RESPONSE =>
+          if inter_cmd_delay >= RF_RESPONSE_CYCLES then
+            cmd_state <= SEND_SNAPSHOT;
+            char_index <= 0;
+            report "TB: Sending 'enable_snapshot' command";
+          else
+            inter_cmd_delay <= inter_cmd_delay + 1;
+          end if;
+
+        -- ====================================================================
+        -- Send "enable_snapshot\n" command - initiate byte transfer
+        -- ====================================================================
+        when SEND_SNAPSHOT =>
+          if tx_ready = '1' then
+            if char_index <= CMD_SNAPSHOT'high then
+              tx_data <= CMD_SNAPSHOT(char_index);
+              tx_valid <= '1';
+              cmd_state <= WAIT_SNAPSHOT_BYTE;  -- Wait for byte to be accepted
+            else
+              -- All characters sent, wait for response + IQ data
+              cmd_state <= WAIT_SNAPSHOT_RESPONSE;
+              inter_cmd_delay <= 0;
+              qpsk_count <= 0;
+              report "TB: 'enable_snapshot' command sent, waiting for response + IQ data";
+            end if;
+          end if;
+
+        -- ====================================================================
+        -- Wait for current byte to be accepted by UART TX
+        -- ====================================================================
+        when WAIT_SNAPSHOT_BYTE =>
+          tx_valid <= '0';  -- Clear valid after one cycle
+          if tx_ready = '0' then
+            -- Byte accepted, wait for TX to become ready again
+            null;
+          elsif tx_ready = '1' then
+            -- TX is ready for next byte
+            char_index <= char_index + 1;
+            cmd_state <= SEND_SNAPSHOT;
+          end if;
+
+        -- ====================================================================
+        -- Wait for snapshot response (includes 4096 bytes of IQ data)
+        -- ====================================================================
+        when WAIT_SNAPSHOT_RESPONSE =>
+          -- Wait for response header + IQ data (4114 bytes at 115200 baud ~ 357ms)
+          if inter_cmd_delay >= SNAPSHOT_RESPONSE_CYCLES then
+            cmd_state <= DONE;
+            qpsk_count <= 1023;  -- Ensure count shows complete
+            report "TB: Command sequence complete";
+          else
+            inter_cmd_delay <= inter_cmd_delay + 1;
+            -- Calculate QPSK word count based on elapsed time
+            -- After header, each IQ word takes IQ_WORD_CYCLES
+            if inter_cmd_delay > SNAPSHOT_HEADER_CYCLES then
+              qpsk_count <= (inter_cmd_delay - SNAPSHOT_HEADER_CYCLES) / IQ_WORD_CYCLES;
+            else
+              qpsk_count <= 0;
+            end if;
+          end if;
+
+        -- ====================================================================
+        -- Done - all commands sent
+        -- ====================================================================
+        when DONE =>
+          null; -- Stay in done state
+
+      end case;
+    end if;
+  end process cmd_sequencer;
 
 end architecture sim;

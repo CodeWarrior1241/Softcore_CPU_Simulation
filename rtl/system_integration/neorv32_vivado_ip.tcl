@@ -195,8 +195,9 @@ proc setup_ip_gui {} {
 
   set group [add_group $page {Execution Trace Buffer (TRACER)}]
   add_params $group {
-    { IO_TRACER_EN     {Enable tracer}      {Implement execution tracer module} }
-    { IO_TRACER_BUFFER {Trace buffer depth} {Maximum number of logged execution deltas} {$IO_TRACER_EN} {$IO_TRACER_EN ? $IO_TRACER_BUFFER : 1} }
+    { IO_TRACER_EN        {Enable tracer}           {Implement execution tracer module} }
+    { IO_TRACER_BUFFER    {Trace buffer depth}      {Maximum number of logged execution deltas} {$IO_TRACER_EN} {$IO_TRACER_EN ? $IO_TRACER_BUFFER : 1} }
+    { IO_TRACER_SIMLOG_EN {Simulation log file}     {Write full trace log to file (simulation-only)} {$IO_TRACER_EN} {$IO_TRACER_EN ? $IO_TRACER_SIMLOG_EN : false} }
   }
 
 

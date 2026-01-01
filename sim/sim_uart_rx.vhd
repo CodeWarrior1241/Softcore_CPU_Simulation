@@ -35,12 +35,14 @@ architecture sim_uart_rx_rtl of sim_uart_rx is
   signal bitcnt : integer;
   constant baud_val_c : real := FCLK / BAUD;
 
+  -- Character file type for raw binary output (one character per write)
+  type char_file_t is file of character;
+
 begin
 
   sim_receiver: process(clk)
-    file file_out   : text open write_mode is NAME & ".log";
+    file file_out : char_file_t open write_mode is NAME & ".log";
     variable char_v : integer;
-    variable line_v : line;
   begin
     if rising_edge(clk) then
       -- synchronizer --
@@ -63,16 +65,14 @@ begin
         if (bitcnt = 0) then
           busy <= '0'; -- done
           char_v := to_integer(unsigned(sreg(8 downto 1)));
+          -- Report to console
           if (char_v < 32) or (char_v > 32+95) then -- non-printable character?
             report NAME & ": (" & integer'image(char_v) & ")";
           else
             report NAME & ": " & character'val(char_v);
           end if;
-          if (char_v = 10) then -- LF line break
-            writeline(file_out, line_v);
-          elsif (char_v /= 13) then -- no additional CR
-            write(line_v, character'val(char_v));
-          end if;
+          -- Write raw byte to file (binary-safe, no text buffering)
+          write(file_out, character'val(char_v));
         else
           sreg   <= sync(4) & sreg(8 downto 1);
           bitcnt <= bitcnt - 1;

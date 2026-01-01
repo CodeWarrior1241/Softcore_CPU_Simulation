@@ -159,7 +159,7 @@ create_bd_cell -type ip -vlnv NEORV32:user:neorv32_vivado_ip:1.0 $neorv32_cpu
 # Configure NEORV32 for AU15P / FMCOMMS4 application
 set_property -dict [list \
     CONFIG.CLOCK_FREQUENCY {100000000} \
-    CONFIG.BOOT_MODE_SELECT {0} \
+    CONFIG.BOOT_MODE_SELECT {2} \
     CONFIG.IMEM_EN {true} \
     CONFIG.IMEM_SIZE {32768} \
     CONFIG.DMEM_EN {true} \
@@ -180,9 +180,12 @@ set_property -dict [list \
     CONFIG.XBUS_EN {true} \
     CONFIG.XBUS_TIMEOUT {255} \
     CONFIG.IO_CLINT_EN {true} \
+    CONFIG.IO_TRACER_EN {true} \
+    CONFIG.IO_TRACER_BUFFER {32} \
+    CONFIG.IO_TRACER_SIMLOG_EN {true} \
 ] [get_bd_cells $neorv32_cpu]
 
-puts "INFO: NEORV32 configured (RV32IMC, 32KB IMEM, 16KB DMEM)"
+puts "INFO: NEORV32 configured (RV32IMC, 32KB IMEM, 16KB DMEM, TRACER enabled)"
 
 # Add board clock input and MMCM
 create_bd_cell -type ip -vlnv xilinx.com:ip:clk_wiz:6.0 $ecs_clock_300_mhz
@@ -231,7 +234,12 @@ startgroup
     CONFIG.MMCM_CLKIN2_PERIOD {10.0} \
     CONFIG.MMCM_DIVCLK_DIVIDE {3} \
     CONFIG.PRIM_IN_FREQ {300.000} \
+    CONFIG.USE_LOCKED {true} \
     ] [get_bd_cells $ecs_clock_300_mhz]
+    make_bd_pins_external  [get_bd_pins $ecs_clock_300_mhz/locked]
+    set_property name sim_clock_100MHz_locked [get_bd_ports locked_0]
+    make_bd_pins_external  [get_bd_pins $ecs_clock_300_mhz/clk_out1]
+    set_property name sim_clock_100MHz [get_bd_ports clk_out1_0]
 endgroup
 
 # Create reset and clocking
@@ -317,4 +325,18 @@ catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_bram_co
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${qpsk_snapshot_bram}_0] }
 export_ip_user_files -of_objects [get_files $bd_file] -no_script -sync -force -quiet
 create_ip_run [get_files -of_objects [get_fileset sources_1] $bd_file]
-launch_runs ${top_level_bd_name}_${axi_bram_controller}_0_synth_1 ${top_level_bd_name}_${axi_cpu_interconnect}_0_synth_1 ${top_level_bd_name}_${cpu_sys_reset}_0_synth_1 ${top_level_bd_name}_${ecs_clock_300_mhz}_0_synth_1 ${top_level_bd_name}_${neorv32_cpu_input_reset}_0_synth_1 ${top_level_bd_name}_${neorv32_cpu}_0_synth_1 ${top_level_bd_name}_${qpsk_snapshot_bram}_0_synth_1 -jobs 16
+set ip_synth_runs [list \
+    ${top_level_bd_name}_${axi_bram_controller}_0_synth_1 \
+    ${top_level_bd_name}_${axi_cpu_interconnect}_0_synth_1 \
+    ${top_level_bd_name}_${cpu_sys_reset}_0_synth_1 \
+    ${top_level_bd_name}_${ecs_clock_300_mhz}_0_synth_1 \
+    ${top_level_bd_name}_${neorv32_cpu_input_reset}_0_synth_1 \
+    ${top_level_bd_name}_${neorv32_cpu}_0_synth_1 \
+    ${top_level_bd_name}_${qpsk_snapshot_bram}_0_synth_1 \
+]
+launch_runs {*}$ip_synth_runs -jobs 16
+wait_on_runs {*}$ip_synth_runs
+update_compile_order -fileset sources_1
+set_property top ${top_level_bd_name}_wrapper [current_fileset -simset]
+#export_simulation -simulator questa -directory NEORV32_Simulation.ip_user_files/sim_scripts -use_ip_compiled_libs -force
+export_simulation -directory NEORV32_Simulation.ip_user_files/sim_scripts -use_ip_compiled_libs -force

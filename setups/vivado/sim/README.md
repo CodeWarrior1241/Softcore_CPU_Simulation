@@ -144,12 +144,25 @@ The testbench (`vivado_tb.vhd`) provides:
 1. **300 MHz Differential Clock** - Matches the AU15P board ECS clock input
 2. **Active-low Reset** - 100ns reset pulse at startup
 3. **UART Monitoring** - Uses `sim_uart_rx` to capture CPU output
+4. **Simulation Clock Output** - The block design exposes `sim_clock_100MHz` for the UART receiver
 
 ### Clock Configuration
 
 - Input: 300 MHz differential (ecs_clk_in_clk_p/n)
-- PLL output: 100 MHz to CPU
+- PLL output: 100 MHz to CPU (exposed as `sim_clock_100MHz` for simulation)
 - UART baud rate: 115200
+
+## Compilation Order
+
+The `compile.do` script compiles sources in the following order:
+
+1. **Vivado's generated `compile.do`** - Compiles all IP cores and block design components
+2. **`sim_uart_rx.vhd`** - UART receiver for capturing CPU serial output
+3. **`Top.vhd`** - Block design entity (recompiled to pick up port changes like `sim_clock_100MHz`)
+4. **`Top_wrapper.vhd`** - Block design wrapper
+5. **`vivado_tb.vhd`** - Top-level testbench
+
+The explicit recompilation of `Top.vhd` and `Top_wrapper.vhd` after running Vivado's compile script ensures that any modifications to the block design ports (such as exposing the `sim_clock_100MHz` output for simulation) are picked up, overwriting stale cached versions in the library.
 
 ## Questa Library Requirements
 
