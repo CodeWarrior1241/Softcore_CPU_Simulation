@@ -11,7 +11,9 @@
 # This script sets up and runs the BRAM readback testbench simulation
 # in order to validate that data from the pre-loaded .coe file into the BRAM
 # can be read back correctly. For convenience it is run right from Vivado,
-# so a complete Vivado project is expected to already exist.
+# so a complete Vivado project is expected to already exist. The already-existing
+# snapshot BRAM already comes with a pre-loaded .coe configuration file, and
+# those are the values read back during the simulation run.
 #
 # ==============================================================================
 
@@ -99,8 +101,10 @@ add_wave {{/snapshot_bram_readback_tb/sample_idx}}
 add_wave {{/snapshot_bram_readback_tb/i_out}}
 add_wave {{/snapshot_bram_readback_tb/q_out}}
 add_wave {{/snapshot_bram_readback_tb/iq_word}}
+add_wave {{/snapshot_bram_readback_tb/expected_word}}
 add_wave {{/snapshot_bram_readback_tb/good_count}}
 add_wave {{/snapshot_bram_readback_tb/bad_count}}
+add_wave {{/snapshot_bram_readback_tb/mismatch_count}}
 add_wave {{/snapshot_bram_readback_tb/test_pass}}
 
 # Run simulation
