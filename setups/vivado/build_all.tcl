@@ -300,7 +300,12 @@ connect_bd_intf_net [get_bd_intf_pins $axi_bram_controller/S_AXI] [get_bd_intf_p
 connect_bd_intf_net [get_bd_intf_pins $axi_bram_controller/BRAM_PORTA] [get_bd_intf_pins $qpsk_snapshot_bram/BRAM_PORTA]
 
 # Assign addressing for AXI peripherals and prepare the top level
+# The QPSK Snapshot BRAM is 8192 words (32KB). By default, Vivado may auto-detect
+# a smaller range. We explicitly set the address offset and range to ensure the
+# AXI BRAM Controller is configured with the correct memory depth (C_MEMORY_DEPTH=8192).
 assign_bd_address -target_address_space /NEORV32_RISC_V/m_axi [get_bd_addr_segs $axi_bram_controller/S_AXI/Mem0] -force
+set_property offset 0xC0000000 [get_bd_addr_segs {NEORV32_RISC_V/m_axi/SEG_AXI_BRAM_Controller_Mem0}]
+set_property range 32K [get_bd_addr_segs {NEORV32_RISC_V/m_axi/SEG_AXI_BRAM_Controller_Mem0}]
 validate_bd_design
 save_bd_design
 set_property target_language VHDL [current_project]
