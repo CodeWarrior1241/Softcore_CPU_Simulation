@@ -98,7 +98,7 @@ add wave -hex /vivado_tb/tx_data
 add wave -hex /vivado_tb/tx_valid
 add wave -hex /vivado_tb/tx_ready
 add wave      /vivado_tb/cmd_state
-add wave -unsigned /vivado_tb/qpsk_count
+add wave -radix unsigned -noshowbase /vivado_tb/qpsk_count
 
 add wave -divider "UUT Internal - Clock Wizard"
 catch {
