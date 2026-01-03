@@ -342,6 +342,8 @@ set ip_synth_runs [list \
 launch_runs {*}$ip_synth_runs -jobs 16
 wait_on_runs {*}$ip_synth_runs
 update_compile_order -fileset sources_1
+
+# Make sure the BD and design is exported for third-party simulators to run with
 set_property top ${top_level_bd_name}_wrapper [current_fileset -simset]
 #export_simulation -simulator questa -directory NEORV32_Simulation.ip_user_files/sim_scripts -use_ip_compiled_libs -force
 export_simulation -directory NEORV32_Simulation.ip_user_files/sim_scripts -use_ip_compiled_libs -force
