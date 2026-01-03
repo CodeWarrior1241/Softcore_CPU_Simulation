@@ -347,3 +347,94 @@ update_compile_order -fileset sources_1
 set_property top ${top_level_bd_name}_wrapper [current_fileset -simset]
 #export_simulation -simulator questa -directory NEORV32_Simulation.ip_user_files/sim_scripts -use_ip_compiled_libs -force
 export_simulation -directory NEORV32_Simulation.ip_user_files/sim_scripts -use_ip_compiled_libs -force
+
+###############################################################################
+# Questa compile.do library fix
+###############################################################################
+#
+# Vivado's export_simulation command generates compile.do scripts that don't
+# properly handle library dependencies for certain Xilinx IP. Specifically:
+#
+#   - axi_bram_ctrl_v4_1_rfs.vhd must be compiled into axi_bram_ctrl_v4_1_13
+#   - proc_sys_reset_v5_0_vh_rfs.vhd must be compiled into proc_sys_reset_v5_0_17
+#
+# Without this fix, Questa reports errors like:
+#   "Recompile axi_bram_ctrl_v4_1_13.axi_bram_ctrl because xpm.vcomponents has changed"
+#   "Cannot find expanded name axi_bram_ctrl_v4_1_13.axi_bram_ctrl"
+#
+# This proc patches the generated compile.do to add proper library mappings.
+###############################################################################
+
+proc fix_questa_compile_do {project_dir} {
+    set compile_do "$project_dir/NEORV32_Simulation.ip_user_files/sim_scripts/questa/compile.do"
+
+    if {![file exists $compile_do]} {
+        puts "WARNING: compile.do not found at $compile_do"
+        return
+    }
+
+    puts "Patching Questa compile.do for proper library dependencies..."
+
+    # Read the original file
+    set fp [open $compile_do r]
+    set content [read $fp]
+    close $fp
+
+    # Check if already patched
+    if {[string match "*vlib questa_lib/msim/axi_bram_ctrl_v4_1_13*" $content]} {
+        puts "  compile.do already patched, skipping"
+        return
+    }
+
+    # Add library creation commands after the existing vlib commands
+    set old_vlib_block {vlib questa_lib/msim/xil_defaultlib}
+    set new_vlib_block {vlib questa_lib/msim/xil_defaultlib
+vlib questa_lib/msim/axi_bram_ctrl_v4_1_13
+vlib questa_lib/msim/proc_sys_reset_v5_0_17}
+
+    set content [string map [list $old_vlib_block $new_vlib_block] $content]
+
+    # Add vmap commands after existing vmaps
+    set old_vmap_block {vmap xil_defaultlib questa_lib/msim/xil_defaultlib}
+    set new_vmap_block {vmap xil_defaultlib questa_lib/msim/xil_defaultlib
+vmap axi_bram_ctrl_v4_1_13 questa_lib/msim/axi_bram_ctrl_v4_1_13
+vmap proc_sys_reset_v5_0_17 questa_lib/msim/proc_sys_reset_v5_0_17}
+
+    set content [string map [list $old_vmap_block $new_vmap_block] $content]
+
+    # Fix the VHDL compilation: split out the library files into their own libraries
+    # Original pattern compiles everything into xil_defaultlib
+    # We need to compile axi_bram_ctrl and proc_sys_reset into their own libraries first
+
+    # Find and replace the vcom block that has axi_bram_ctrl_v4_1_rfs.vhd
+    set old_vcom_pattern {vcom -work xil_defaultlib  -93  \
+"../../../../../../../../Xilinx/2025.2/Vivado/data/ip/xilinx/axi_bram_ctrl_v4_1/hdl/axi_bram_ctrl_v4_1_rfs.vhd" \
+"../../../NEORV32_Simulation.gen/sources_1/bd/Top/ip/Top_AXI_BRAM_Controller_0/sim/Top_AXI_BRAM_Controller_0.vhd" \
+"../../../../../../../../Xilinx/2025.2/Vivado/data/ip/xilinx/proc_sys_reset_v5_0/hdl/proc_sys_reset_v5_0_vh_rfs.vhd" \
+"../../../NEORV32_Simulation.gen/sources_1/bd/Top/ip/Top_AXI_CPU_Interconnect_0/bd_0/ip/ip_1/sim/bd_e51e_psr_aclk_0.vhd"}
+
+    set new_vcom_pattern {# Compile AXI BRAM Controller library (must be in its own library)
+vcom -work axi_bram_ctrl_v4_1_13  -93  \
+"../../../../../../../../Xilinx/2025.2/Vivado/data/ip/xilinx/axi_bram_ctrl_v4_1/hdl/axi_bram_ctrl_v4_1_rfs.vhd"
+
+# Compile proc_sys_reset library (must be in its own library)
+vcom -work proc_sys_reset_v5_0_17  -93  \
+"../../../../../../../../Xilinx/2025.2/Vivado/data/ip/xilinx/proc_sys_reset_v5_0/hdl/proc_sys_reset_v5_0_vh_rfs.vhd"
+
+# Compile design files that use the above libraries
+vcom -work xil_defaultlib  -93  \
+"../../../NEORV32_Simulation.gen/sources_1/bd/Top/ip/Top_AXI_BRAM_Controller_0/sim/Top_AXI_BRAM_Controller_0.vhd" \
+"../../../NEORV32_Simulation.gen/sources_1/bd/Top/ip/Top_AXI_CPU_Interconnect_0/bd_0/ip/ip_1/sim/bd_e51e_psr_aclk_0.vhd"}
+
+    set content [string map [list $old_vcom_pattern $new_vcom_pattern] $content]
+
+    # Write back the patched file
+    set fp [open $compile_do w]
+    puts -nonewline $fp $content
+    close $fp
+
+    puts "  compile.do patched successfully"
+}
+
+# Apply the fix
+fix_questa_compile_do $project_dir
