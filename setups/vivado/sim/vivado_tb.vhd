@@ -77,6 +77,30 @@ architecture sim of vivado_tb is
   -- After the 18-char "snapshot_enabled\r\n" header, IQ data begins
   signal qpsk_count : natural range 0 to 1023 := 0;
 
+  -- ============================================================================
+  -- AXI Read Address Monitoring Signals (for debugging BRAM access issues)
+  -- These aliases reference internal signals in the block design hierarchy
+  -- ============================================================================
+  -- CPU's AXI read address output (32-bit full address from NEORV32)
+  alias cpu_araddr : std_logic_vector(31 downto 0) is
+    <<signal .vivado_tb.uut.Top_i.NEORV32_RISC_V.m_axi_araddr : std_logic_vector(31 downto 0)>>;
+  alias cpu_arvalid : std_logic is
+    <<signal .vivado_tb.uut.Top_i.NEORV32_RISC_V.m_axi_arvalid : std_logic>>;
+  alias cpu_arready : std_logic is
+    <<signal .vivado_tb.uut.Top_i.NEORV32_RISC_V.m_axi_arready : std_logic>>;
+
+  -- BRAM interface signals (VHDL signals in Top.vhd that connect to the Verilog BRAM)
+  -- These are the signals between AXI BRAM Controller and the BRAM IP
+  alias bram_addr : std_logic_vector(14 downto 0) is
+    <<signal .vivado_tb.uut.Top_i.AXI_BRAM_Controller_BRAM_PORTA_ADDR : std_logic_vector(14 downto 0)>>;
+  alias bram_ena : std_logic is
+    <<signal .vivado_tb.uut.Top_i.AXI_BRAM_Controller_BRAM_PORTA_EN : std_logic>>;
+  alias bram_dout : std_logic_vector(31 downto 0) is
+    <<signal .vivado_tb.uut.Top_i.AXI_BRAM_Controller_BRAM_PORTA_DOUT : std_logic_vector(31 downto 0)>>;
+
+  -- Read transaction counter
+  signal read_count : natural := 0;
+
   -- Command strings (as arrays of bytes)
   -- "enable_rf" + LF
   type cmd_enable_rf_t is array (0 to 9) of std_ulogic_vector(7 downto 0);
@@ -340,5 +364,53 @@ begin
       end case;
     end if;
   end process cmd_sequencer;
+
+  -- ============================================================================
+  -- AXI Read Address Monitor - Logs every BRAM read transaction
+  -- ============================================================================
+  -- This process monitors AXI read address handshakes and logs the addresses
+  -- to help debug the QPSK data corruption issue.
+  axi_read_monitor: process(cpu_clk)
+    variable last_arvalid : std_logic := '0';
+  begin
+    if rising_edge(cpu_clk) then
+      -- Detect AXI read address handshake (arvalid='1' AND arready='1')
+      if cpu_arvalid = '1' and cpu_arready = '1' then
+        -- Check if this is a read to the BRAM address range (0xC0000000)
+        if cpu_araddr(31 downto 16) = x"C000" then
+          read_count <= read_count + 1;
+          -- Log every read transaction with CPU address and computed sample index
+          report "AXI Read #" & integer'image(read_count) &
+                 ": CPU_ARADDR=0x" & to_hstring(unsigned(cpu_araddr)) &
+                 " -> Sample=" & integer'image(to_integer(unsigned(cpu_araddr(13 downto 2))))
+            severity note;
+        end if;
+      end if;
+    end if;
+  end process axi_read_monitor;
+
+  -- ============================================================================
+  -- BRAM Address Monitor - Logs the actual address presented to BRAM
+  -- ============================================================================
+  -- This process monitors the BRAM interface to see what address the
+  -- AXI BRAM Controller actually sends to the BRAM.
+  bram_access_monitor: process(cpu_clk)
+    variable last_ena : std_logic := '0';
+    variable word_addr : natural;
+  begin
+    if rising_edge(cpu_clk) then
+      -- Detect BRAM enable rising edge (new access)
+      if bram_ena = '1' and last_ena = '0' then
+        -- Calculate word address (BRAM is 32-bit wide, byte address / 4)
+        -- Controller outputs byte address, BRAM IP receives lower 13 bits
+        word_addr := to_integer(unsigned(bram_addr(14 downto 2)));
+        report "BRAM Access: ADDR=0x" & to_hstring(unsigned(bram_addr)) &
+               " (word=" & integer'image(word_addr) & ")" &
+               " -> DOUT=0x" & to_hstring(unsigned(bram_dout))
+          severity note;
+      end if;
+      last_ena := bram_ena;
+    end if;
+  end process bram_access_monitor;
 
 end architecture sim;

@@ -98,7 +98,7 @@ add wave -hex /vivado_tb/tx_data
 add wave -hex /vivado_tb/tx_valid
 add wave -hex /vivado_tb/tx_ready
 add wave      /vivado_tb/cmd_state
-add wave -radix unsigned -noshowbase /vivado_tb/qpsk_count
+add wave -radix unsigned /vivado_tb/qpsk_count
 
 add wave -divider "UUT Internal - Clock Wizard"
 catch {
@@ -117,6 +117,17 @@ catch {
 add wave -divider "UUT Internal - AXI Bus"
 catch {
     add wave -hex /vivado_tb/uut/Top_i/NEORV32_RISC_V/m_axi_*
+}
+
+add wave -divider "BRAM Address Monitoring"
+catch {
+    add wave -radix unsigned /vivado_tb/read_count
+    add wave -hex /vivado_tb/cpu_araddr
+    add wave /vivado_tb/cpu_arvalid
+    add wave /vivado_tb/cpu_arready
+    add wave -hex /vivado_tb/bram_addr
+    add wave /vivado_tb/bram_ena
+    add wave -hex /vivado_tb/bram_dout
 }
 
 # ================================================================================
