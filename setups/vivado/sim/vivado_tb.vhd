@@ -141,8 +141,10 @@ architecture sim of vivado_tb is
   -- These are the signals between AXI BRAM Controller and the BRAM IP
   alias bram_addr : std_logic_vector(14 downto 0) is
     <<signal .vivado_tb.uut.Top_i.AXI_BRAM_Controller_BRAM_PORTA_ADDR : std_logic_vector(14 downto 0)>>;
-  alias bram_ena : std_logic is
-    <<signal .vivado_tb.uut.Top_i.AXI_BRAM_Controller_BRAM_PORTA_EN : std_logic>>;
+  -- BRAM enable is tied high in block design, signal no longer exists
+  -- alias bram_ena : std_logic is
+  --   <<signal .vivado_tb.uut.Top_i.AXI_BRAM_Controller_BRAM_PORTA_EN : std_logic>>;
+  constant bram_ena : std_logic := '1';  -- Always enabled
   alias bram_dout : std_logic_vector(31 downto 0) is
     <<signal .vivado_tb.uut.Top_i.AXI_BRAM_Controller_BRAM_PORTA_DOUT : std_logic_vector(31 downto 0)>>;
 
@@ -485,31 +487,11 @@ begin
         bram_ctrl_read_count <= bram_ctrl_read_count + 1;
         word_index := to_integer(unsigned(bram_ctrl_araddr(14 downto 2)));
         last_bram_ctrl_araddr <= bram_ctrl_araddr;
-
-        report "[BRAM_CTRL AR #" & integer'image(bram_ctrl_read_count) & "] " &
-               "ADDR=0x" & to_hstring(unsigned(bram_ctrl_araddr)) &
-               " (word=" & integer'image(word_index) & ")" &
-               " LEN=" & integer'image(to_integer(unsigned(bram_ctrl_arlen))) &
-               " BURST=" & integer'image(to_integer(unsigned(bram_ctrl_arburst)))
-          severity note;
       end if;
 
       -- Monitor AXI R channel from BRAM Controller
       if bram_ctrl_rvalid = '1' and bram_ctrl_rready = '1' then
         bram_ctrl_rdata_count <= bram_ctrl_rdata_count + 1;
-
-        report "[BRAM_CTRL RD #" & integer'image(bram_ctrl_rdata_count) & "] " &
-               "DATA=0x" & to_hstring(unsigned(bram_ctrl_rdata)) &
-               " RESP=" & integer'image(to_integer(unsigned(bram_ctrl_rresp))) &
-               " LAST=" & std_logic'image(bram_ctrl_rlast)
-          severity note;
-
-        -- Flag potential corruption
-        if bram_ctrl_rdata = x"000000FF" then
-          report "[BRAM_CTRL RD #" & integer'image(bram_ctrl_rdata_count) & "] " &
-                 "*** WARNING: Data=0x000000FF matches uninitialized BRAM default! ***"
-            severity warning;
-        end if;
       end if;
     end if;
   end process bram_ctrl_axi_monitor;
@@ -520,33 +502,8 @@ begin
   -- Monitors the actual BRAM interface (between AXI BRAM Controller and BRAM IP)
   bram_access_monitor: process(cpu_clk)
     variable last_ena : std_logic := '0';
-    variable word_addr : natural;
   begin
     if rising_edge(cpu_clk) then
-      -- Detect BRAM enable rising edge (new access)
-      if bram_ena = '1' and last_ena = '0' then
-        -- Calculate word address (BRAM is 32-bit wide, byte address / 4)
-        word_addr := to_integer(unsigned(bram_addr(14 downto 2)));
-        report "[BRAM] ADDR=0x" & to_hstring(unsigned(bram_addr)) &
-               " (word=" & integer'image(word_addr) & ")"
-          severity note;
-      end if;
-
-      -- Log BRAM data output when enable is active (1 cycle after address)
-      if last_ena = '1' then
-        word_addr := to_integer(unsigned(bram_addr(14 downto 2)));
-        report "[BRAM] DOUT=0x" & to_hstring(unsigned(bram_dout)) &
-               " (word=" & integer'image(word_addr) & ")"
-          severity note;
-
-        -- Flag potential corruption
-        if bram_dout = x"000000FF" then
-          report "[BRAM] *** WARNING: DOUT=0x000000FF at word " &
-                 integer'image(word_addr) & " - uninitialized BRAM default! ***"
-            severity warning;
-        end if;
-      end if;
-
       last_ena := bram_ena;
     end if;
   end process bram_access_monitor;

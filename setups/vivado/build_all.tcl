@@ -271,17 +271,23 @@ set_property -dict [list \
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_bram_ctrl:4.1 $axi_bram_controller
 set_property CONFIG.SINGLE_PORT_BRAM {1} [get_bd_cells $axi_bram_controller]
 set_property CONFIG.READ_LATENCY {2} [get_bd_cells $axi_bram_controller]
+set_property CONFIG.PROTOCOL {AXI4} [get_bd_cells $axi_bram_controller]
 create_bd_cell -type ip -vlnv xilinx.com:ip:blk_mem_gen:8.4 $qpsk_snapshot_bram
 set_property -dict [list CONFIG.Enable_32bit_Address.VALUE_SRC PROPAGATED] [get_bd_cells $qpsk_snapshot_bram]
 
 # Load the BRAM initialization file
+# BRAM cannot be pre-loaded with a COE if in BRAM Controller mode, so leave as stand Alone
+# With this the case, the BRAM Controller can't handle latency of the BRAM if it's greater than 1, so leave in Always Enabled instead of strobed
 set coe_file [file normalize "$project_dir/sim/qpsk_bram_init.coe"]
 set_property -dict [list \
     CONFIG.Coe_File $coe_file \
     CONFIG.Load_Init_File {true} \
     CONFIG.use_bram_block {Stand_Alone} \
     CONFIG.Enable_32bit_Address {true} \
+    CONFIG.Enable_A {Always_Enabled} \
     CONFIG.EN_SAFETY_CKT {false} \
+    CONFIG.Register_PortA_Output_of_Memory_Core {true} \
+    CONFIG.Register_PortA_Output_of_Memory_Primitives {false} \
     CONFIG.Fill_Remaining_Memory_Locations {true} \
     CONFIG.Remaining_Memory_Locations {FF} \
 ] [get_bd_cells $qpsk_snapshot_bram]
