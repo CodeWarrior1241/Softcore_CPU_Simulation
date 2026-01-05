@@ -131,7 +131,8 @@ architecture sim of snapshot_bram_readback_tb is
   signal bram_clk_a    : std_logic;
   signal bram_en_a     : std_logic;
   signal bram_we_a     : std_logic_vector(3 downto 0);
-  signal bram_addr_a   : std_logic_vector(14 downto 0);
+  signal bram_addr_a   : std_logic_vector(14 downto 0);  -- 15-bit from BRAM Controller
+  signal bram_addr_a_ext : std_logic_vector(31 downto 0);  -- 32-bit for BRAM (zero-extended)
   signal bram_wrdata_a : std_logic_vector(31 downto 0);
   signal bram_rddata_a : std_logic_vector(31 downto 0);
 
@@ -299,21 +300,23 @@ architecture sim of snapshot_bram_readback_tb is
       bram_clk_a    : out std_logic;
       bram_en_a     : out std_logic;
       bram_we_a     : out std_logic_vector(3 downto 0);
-      bram_addr_a   : out std_logic_vector(14 downto 0);
+      bram_addr_a   : out std_logic_vector(14 downto 0);  -- 15-bit byte address
       bram_wrdata_a : out std_logic_vector(31 downto 0);
       bram_rddata_a : in  std_logic_vector(31 downto 0)
     );
   end component;
 
-  -- BRAM IP
-  -- Note: BRAM uses 13-bit word address (8192 words), while AXI BRAM Controller
-  -- outputs 15-bit byte address. The port map strips the lower 2 bits.
+  -- BRAM IP (Standalone mode with 32-bit addressing)
+  -- Configured for Standalone mode to allow COE file initialization.
+  -- Uses 32-bit byte addresses (zero-extended from controller's 15-bit output).
+  -- The BRAM internally handles byte-to-word address conversion.
   component Top_QPSK_Snapshot_BRAM_0
     port (
       clka  : in  std_logic;
+      rsta  : in  std_logic;
       ena   : in  std_logic;
-      wea   : in  std_logic_vector(0 downto 0);
-      addra : in  std_logic_vector(12 downto 0);  -- 13-bit word address
+      wea   : in  std_logic_vector(3 downto 0);   -- Byte-enable writes
+      addra : in  std_logic_vector(31 downto 0);  -- 32-bit byte address
       dina  : in  std_logic_vector(31 downto 0);
       douta : out std_logic_vector(31 downto 0)
     );
@@ -463,16 +466,22 @@ begin
     );
 
   -- =========================================================================
-  -- QPSK Snapshot BRAM
-  -- AXI BRAM Controller outputs 15-bit byte address, BRAM needs 13-bit word address.
-  -- Strip lower 2 bits (byte offset) to convert byte address to word address.
+  -- QPSK Snapshot BRAM (Standalone mode with 32-bit addressing)
+  -- The BRAM is in Standalone mode to allow COE file initialization.
+  -- The BRAM Controller outputs 15-bit byte address, which we zero-extend
+  -- to 32 bits. The BRAM IP handles byte-to-word conversion internally.
   -- =========================================================================
+
+  -- Zero-extend the 15-bit address from BRAM Controller to 32-bit for BRAM
+  bram_addr_a_ext <= (31 downto 15 => '0') & bram_addr_a;
+
   bram: Top_QPSK_Snapshot_BRAM_0
     port map (
       clka  => bram_clk_a,
+      rsta  => bram_rst_a,
       ena   => bram_en_a,
-      wea   => bram_we_a(0 downto 0),
-      addra => bram_addr_a(14 downto 2),  -- Byte-to-word address conversion
+      wea   => bram_we_a,           -- Full 4-bit byte enables
+      addra => bram_addr_a_ext,     -- Zero-extended 32-bit address
       dina  => bram_wrdata_a,
       douta => bram_rddata_a
     );

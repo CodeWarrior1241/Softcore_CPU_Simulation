@@ -23,21 +23,17 @@ puts "Simulation time: $SIM_TIME"
 puts "=========================================="
 
 # ================================================================================
-# Map all libraries from Vivado's questa directory
+# Map locally-compiled libraries from Vivado's questa directory
 # ================================================================================
 
 # The compile.do already set sim_dir and vivado_questa_dir
-# Map all the required libraries
+# Map only the libraries that we compile locally (others come from pre-compiled modelsim.ini)
 vmap xilinx_vip $vivado_questa_dir/questa_lib/msim/xilinx_vip
 vmap xpm $vivado_questa_dir/questa_lib/msim/xpm
+vmap xil_defaultlib $vivado_questa_dir/questa_lib/msim/xil_defaultlib
 vmap proc_sys_reset_v5_0_17 $vivado_questa_dir/questa_lib/msim/proc_sys_reset_v5_0_17
-vmap util_vector_logic_v2_0_5 $vivado_questa_dir/questa_lib/msim/util_vector_logic_v2_0_5
-vmap smartconnect_v1_0 $vivado_questa_dir/questa_lib/msim/smartconnect_v1_0
-vmap axi_infrastructure_v1_1_0 $vivado_questa_dir/questa_lib/msim/axi_infrastructure_v1_1_0
-vmap axi_register_slice_v2_1_36 $vivado_questa_dir/questa_lib/msim/axi_register_slice_v2_1_36
-vmap axi_vip_v1_1_22 $vivado_questa_dir/questa_lib/msim/axi_vip_v1_1_22
 vmap axi_bram_ctrl_v4_1_13 $vivado_questa_dir/questa_lib/msim/axi_bram_ctrl_v4_1_13
-vmap blk_mem_gen_v8_4_12 $vivado_questa_dir/questa_lib/msim/blk_mem_gen_v8_4_12
+vmap neorv32 $vivado_questa_dir/questa_lib/msim/neorv32
 
 # ================================================================================
 # Elaborate and Load Design
@@ -49,11 +45,13 @@ cd $vivado_questa_dir
 
 # Elaborate with optimization for the testbench
 # Include all required Xilinx libraries
+# Use -Lf neorv32 to force component binding to search the neorv32 library
+# (required because Top_NEORV32_RISC_V_0 uses component instantiation for neorv32_vivado_ip)
 vopt -l elaborate.log +acc=npr -suppress 10016 \
     -L xil_defaultlib \
     -L xilinx_vip \
     -L xpm \
-    -L neorv32 \
+    -Lf neorv32 \
     -L proc_sys_reset_v5_0_17 \
     -L util_vector_logic_v2_0_5 \
     -L smartconnect_v1_0 \
@@ -119,12 +117,38 @@ catch {
     add wave -hex /vivado_tb/uut/Top_i/NEORV32_RISC_V/m_axi_*
 }
 
-add wave -divider "BRAM Address Monitoring"
+add wave -divider "CPU AXI Master (#3)"
 catch {
-    add wave -radix unsigned /vivado_tb/read_count
+    add wave -radix unsigned /vivado_tb/cpu_read_count
     add wave -hex /vivado_tb/cpu_araddr
     add wave /vivado_tb/cpu_arvalid
     add wave /vivado_tb/cpu_arready
+    add wave -hex /vivado_tb/cpu_arlen
+    add wave -hex /vivado_tb/cpu_arburst
+    add wave -radix unsigned /vivado_tb/cpu_rdata_count
+    add wave -hex /vivado_tb/cpu_rdata
+    add wave /vivado_tb/cpu_rvalid
+    add wave /vivado_tb/cpu_rready
+    add wave /vivado_tb/cpu_rlast
+}
+
+add wave -divider "AXI BRAM Controller (#2)"
+catch {
+    add wave -radix unsigned /vivado_tb/bram_ctrl_read_count
+    add wave -hex /vivado_tb/bram_ctrl_araddr
+    add wave /vivado_tb/bram_ctrl_arvalid
+    add wave /vivado_tb/bram_ctrl_arready
+    add wave -hex /vivado_tb/bram_ctrl_arlen
+    add wave -hex /vivado_tb/bram_ctrl_arburst
+    add wave -radix unsigned /vivado_tb/bram_ctrl_rdata_count
+    add wave -hex /vivado_tb/bram_ctrl_rdata
+    add wave /vivado_tb/bram_ctrl_rvalid
+    add wave /vivado_tb/bram_ctrl_rready
+    add wave /vivado_tb/bram_ctrl_rlast
+}
+
+add wave -divider "BRAM Direct Access (#1)"
+catch {
     add wave -hex /vivado_tb/bram_addr
     add wave /vivado_tb/bram_ena
     add wave -hex /vivado_tb/bram_dout

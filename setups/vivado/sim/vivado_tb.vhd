@@ -13,6 +13,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use std.textio.all;
 
 entity vivado_tb is
   generic (
@@ -81,6 +82,10 @@ architecture sim of vivado_tb is
   -- AXI Read Address Monitoring Signals (for debugging BRAM access issues)
   -- These aliases reference internal signals in the block design hierarchy
   -- ============================================================================
+
+  -- ============================================================================
+  -- #3: CPU AXI Master Interface Monitoring
+  -- ============================================================================
   -- CPU's AXI read address output (32-bit full address from NEORV32)
   alias cpu_araddr : std_logic_vector(31 downto 0) is
     <<signal .vivado_tb.uut.Top_i.NEORV32_RISC_V.m_axi_araddr : std_logic_vector(31 downto 0)>>;
@@ -88,6 +93,49 @@ architecture sim of vivado_tb is
     <<signal .vivado_tb.uut.Top_i.NEORV32_RISC_V.m_axi_arvalid : std_logic>>;
   alias cpu_arready : std_logic is
     <<signal .vivado_tb.uut.Top_i.NEORV32_RISC_V.m_axi_arready : std_logic>>;
+  alias cpu_arlen : std_logic_vector(7 downto 0) is
+    <<signal .vivado_tb.uut.Top_i.NEORV32_RISC_V.m_axi_arlen : std_logic_vector(7 downto 0)>>;
+  alias cpu_arsize : std_logic_vector(2 downto 0) is
+    <<signal .vivado_tb.uut.Top_i.NEORV32_RISC_V.m_axi_arsize : std_logic_vector(2 downto 0)>>;
+  alias cpu_arburst : std_logic_vector(1 downto 0) is
+    <<signal .vivado_tb.uut.Top_i.NEORV32_RISC_V.m_axi_arburst : std_logic_vector(1 downto 0)>>;
+  -- CPU's AXI read data channel
+  alias cpu_rdata : std_logic_vector(31 downto 0) is
+    <<signal .vivado_tb.uut.Top_i.NEORV32_RISC_V.m_axi_rdata : std_logic_vector(31 downto 0)>>;
+  alias cpu_rvalid : std_logic is
+    <<signal .vivado_tb.uut.Top_i.NEORV32_RISC_V.m_axi_rvalid : std_logic>>;
+  alias cpu_rready : std_logic is
+    <<signal .vivado_tb.uut.Top_i.NEORV32_RISC_V.m_axi_rready : std_logic>>;
+  alias cpu_rresp : std_logic_vector(1 downto 0) is
+    <<signal .vivado_tb.uut.Top_i.NEORV32_RISC_V.m_axi_rresp : std_logic_vector(1 downto 0)>>;
+  alias cpu_rlast : std_logic is
+    <<signal .vivado_tb.uut.Top_i.NEORV32_RISC_V.m_axi_rlast : std_logic>>;
+
+  -- ============================================================================
+  -- #2: AXI BRAM Controller Interface Monitoring
+  -- ============================================================================
+  -- AXI signals at input to BRAM Controller (from SmartConnect)
+  alias bram_ctrl_araddr : std_logic_vector(14 downto 0) is
+    <<signal .vivado_tb.uut.Top_i.AXI_CPU_Interconnect_M00_AXI_ARADDR : std_logic_vector(14 downto 0)>>;
+  alias bram_ctrl_arvalid : std_logic is
+    <<signal .vivado_tb.uut.Top_i.AXI_CPU_Interconnect_M00_AXI_ARVALID : std_logic>>;
+  alias bram_ctrl_arready : std_logic is
+    <<signal .vivado_tb.uut.Top_i.AXI_CPU_Interconnect_M00_AXI_ARREADY : std_logic>>;
+  alias bram_ctrl_arlen : std_logic_vector(7 downto 0) is
+    <<signal .vivado_tb.uut.Top_i.AXI_CPU_Interconnect_M00_AXI_ARLEN : std_logic_vector(7 downto 0)>>;
+  alias bram_ctrl_arburst : std_logic_vector(1 downto 0) is
+    <<signal .vivado_tb.uut.Top_i.AXI_CPU_Interconnect_M00_AXI_ARBURST : std_logic_vector(1 downto 0)>>;
+  -- AXI read data channel from BRAM Controller
+  alias bram_ctrl_rdata : std_logic_vector(31 downto 0) is
+    <<signal .vivado_tb.uut.Top_i.AXI_CPU_Interconnect_M00_AXI_RDATA : std_logic_vector(31 downto 0)>>;
+  alias bram_ctrl_rvalid : std_logic is
+    <<signal .vivado_tb.uut.Top_i.AXI_CPU_Interconnect_M00_AXI_RVALID : std_logic>>;
+  alias bram_ctrl_rready : std_logic is
+    <<signal .vivado_tb.uut.Top_i.AXI_CPU_Interconnect_M00_AXI_RREADY : std_logic>>;
+  alias bram_ctrl_rresp : std_logic_vector(1 downto 0) is
+    <<signal .vivado_tb.uut.Top_i.AXI_CPU_Interconnect_M00_AXI_RRESP : std_logic_vector(1 downto 0)>>;
+  alias bram_ctrl_rlast : std_logic is
+    <<signal .vivado_tb.uut.Top_i.AXI_CPU_Interconnect_M00_AXI_RLAST : std_logic>>;
 
   -- BRAM interface signals (VHDL signals in Top.vhd that connect to the Verilog BRAM)
   -- These are the signals between AXI BRAM Controller and the BRAM IP
@@ -98,8 +146,18 @@ architecture sim of vivado_tb is
   alias bram_dout : std_logic_vector(31 downto 0) is
     <<signal .vivado_tb.uut.Top_i.AXI_BRAM_Controller_BRAM_PORTA_DOUT : std_logic_vector(31 downto 0)>>;
 
-  -- Read transaction counter
-  signal read_count : natural := 0;
+  -- Transaction counters and tracking
+  signal cpu_read_count : natural := 0;
+  signal bram_ctrl_read_count : natural := 0;
+  signal cpu_rdata_count : natural := 0;
+  signal bram_ctrl_rdata_count : natural := 0;
+
+  -- Track last addresses for comparison
+  signal last_cpu_araddr : std_logic_vector(31 downto 0) := (others => '0');
+  signal last_bram_ctrl_araddr : std_logic_vector(14 downto 0) := (others => '0');
+
+  -- File for CSV logging
+  file axi_log_file : text;
 
   -- Command strings (as arrays of bytes)
   -- "enable_rf" + LF
@@ -366,34 +424,100 @@ begin
   end process cmd_sequencer;
 
   -- ============================================================================
-  -- AXI Read Address Monitor - Logs every BRAM read transaction
+  -- #3: CPU AXI Master Interface Monitor
   -- ============================================================================
-  -- This process monitors AXI read address handshakes and logs the addresses
-  -- to help debug the QPSK data corruption issue.
-  axi_read_monitor: process(cpu_clk)
-    variable last_arvalid : std_logic := '0';
+  -- Monitors the CPU's AXI master port to track all read requests and responses
+  cpu_axi_monitor: process(cpu_clk)
+    variable word_index : natural;
   begin
     if rising_edge(cpu_clk) then
-      -- Detect AXI read address handshake (arvalid='1' AND arready='1')
+      -- Monitor AXI AR channel (read address) handshake
       if cpu_arvalid = '1' and cpu_arready = '1' then
         -- Check if this is a read to the BRAM address range (0xC0000000)
         if cpu_araddr(31 downto 16) = x"C000" then
-          read_count <= read_count + 1;
-          -- Log every read transaction with CPU address and computed sample index
-          report "AXI Read #" & integer'image(read_count) &
-                 ": CPU_ARADDR=0x" & to_hstring(unsigned(cpu_araddr)) &
-                 " -> Sample=" & integer'image(to_integer(unsigned(cpu_araddr(13 downto 2))))
+          cpu_read_count <= cpu_read_count + 1;
+          word_index := to_integer(unsigned(cpu_araddr(13 downto 2)));
+          last_cpu_araddr <= cpu_araddr;
+
+          report "[CPU AR #" & integer'image(cpu_read_count) & "] " &
+                 "ADDR=0x" & to_hstring(unsigned(cpu_araddr)) &
+                 " (word=" & integer'image(word_index) & ")" &
+                 " LEN=" & integer'image(to_integer(unsigned(cpu_arlen))) &
+                 " SIZE=" & integer'image(to_integer(unsigned(cpu_arsize))) &
+                 " BURST=" & integer'image(to_integer(unsigned(cpu_arburst)))
             severity note;
         end if;
       end if;
+
+      -- Monitor AXI R channel (read data) handshake
+      if cpu_rvalid = '1' and cpu_rready = '1' then
+        cpu_rdata_count <= cpu_rdata_count + 1;
+
+        -- Only log BRAM-related reads (check if we're in BRAM access context)
+        if last_cpu_araddr(31 downto 16) = x"C000" then
+          report "[CPU RD #" & integer'image(cpu_rdata_count) & "] " &
+                 "DATA=0x" & to_hstring(unsigned(cpu_rdata)) &
+                 " RESP=" & integer'image(to_integer(unsigned(cpu_rresp))) &
+                 " LAST=" & std_logic'image(cpu_rlast)
+            severity note;
+
+          -- Flag potential corruption: data is 0x000000FF (uninitialized BRAM default)
+          if cpu_rdata = x"000000FF" then
+            report "[CPU RD #" & integer'image(cpu_rdata_count) & "] " &
+                   "*** WARNING: Data=0x000000FF matches uninitialized BRAM default! ***"
+              severity warning;
+          end if;
+        end if;
+      end if;
     end if;
-  end process axi_read_monitor;
+  end process cpu_axi_monitor;
 
   -- ============================================================================
-  -- BRAM Address Monitor - Logs the actual address presented to BRAM
+  -- #2: AXI BRAM Controller Interface Monitor
   -- ============================================================================
-  -- This process monitors the BRAM interface to see what address the
-  -- AXI BRAM Controller actually sends to the BRAM.
+  -- Monitors the AXI interface at the BRAM Controller input (from SmartConnect)
+  bram_ctrl_axi_monitor: process(cpu_clk)
+    variable word_index : natural;
+  begin
+    if rising_edge(cpu_clk) then
+      -- Monitor AXI AR channel at BRAM Controller input
+      if bram_ctrl_arvalid = '1' and bram_ctrl_arready = '1' then
+        bram_ctrl_read_count <= bram_ctrl_read_count + 1;
+        word_index := to_integer(unsigned(bram_ctrl_araddr(14 downto 2)));
+        last_bram_ctrl_araddr <= bram_ctrl_araddr;
+
+        report "[BRAM_CTRL AR #" & integer'image(bram_ctrl_read_count) & "] " &
+               "ADDR=0x" & to_hstring(unsigned(bram_ctrl_araddr)) &
+               " (word=" & integer'image(word_index) & ")" &
+               " LEN=" & integer'image(to_integer(unsigned(bram_ctrl_arlen))) &
+               " BURST=" & integer'image(to_integer(unsigned(bram_ctrl_arburst)))
+          severity note;
+      end if;
+
+      -- Monitor AXI R channel from BRAM Controller
+      if bram_ctrl_rvalid = '1' and bram_ctrl_rready = '1' then
+        bram_ctrl_rdata_count <= bram_ctrl_rdata_count + 1;
+
+        report "[BRAM_CTRL RD #" & integer'image(bram_ctrl_rdata_count) & "] " &
+               "DATA=0x" & to_hstring(unsigned(bram_ctrl_rdata)) &
+               " RESP=" & integer'image(to_integer(unsigned(bram_ctrl_rresp))) &
+               " LAST=" & std_logic'image(bram_ctrl_rlast)
+          severity note;
+
+        -- Flag potential corruption
+        if bram_ctrl_rdata = x"000000FF" then
+          report "[BRAM_CTRL RD #" & integer'image(bram_ctrl_rdata_count) & "] " &
+                 "*** WARNING: Data=0x000000FF matches uninitialized BRAM default! ***"
+            severity warning;
+        end if;
+      end if;
+    end if;
+  end process bram_ctrl_axi_monitor;
+
+  -- ============================================================================
+  -- BRAM Direct Access Monitor
+  -- ============================================================================
+  -- Monitors the actual BRAM interface (between AXI BRAM Controller and BRAM IP)
   bram_access_monitor: process(cpu_clk)
     variable last_ena : std_logic := '0';
     variable word_addr : natural;
@@ -402,15 +526,53 @@ begin
       -- Detect BRAM enable rising edge (new access)
       if bram_ena = '1' and last_ena = '0' then
         -- Calculate word address (BRAM is 32-bit wide, byte address / 4)
-        -- Controller outputs byte address, BRAM IP receives lower 13 bits
         word_addr := to_integer(unsigned(bram_addr(14 downto 2)));
-        report "BRAM Access: ADDR=0x" & to_hstring(unsigned(bram_addr)) &
-               " (word=" & integer'image(word_addr) & ")" &
-               " -> DOUT=0x" & to_hstring(unsigned(bram_dout))
+        report "[BRAM] ADDR=0x" & to_hstring(unsigned(bram_addr)) &
+               " (word=" & integer'image(word_addr) & ")"
           severity note;
       end if;
+
+      -- Log BRAM data output when enable is active (1 cycle after address)
+      if last_ena = '1' then
+        word_addr := to_integer(unsigned(bram_addr(14 downto 2)));
+        report "[BRAM] DOUT=0x" & to_hstring(unsigned(bram_dout)) &
+               " (word=" & integer'image(word_addr) & ")"
+          severity note;
+
+        -- Flag potential corruption
+        if bram_dout = x"000000FF" then
+          report "[BRAM] *** WARNING: DOUT=0x000000FF at word " &
+                 integer'image(word_addr) & " - uninitialized BRAM default! ***"
+            severity warning;
+        end if;
+      end if;
+
       last_ena := bram_ena;
     end if;
   end process bram_access_monitor;
+
+  -- ============================================================================
+  -- Address Comparison Monitor
+  -- ============================================================================
+  -- Compares CPU address vs BRAM Controller address to detect translation issues
+  addr_compare_monitor: process(cpu_clk)
+    variable cpu_word : natural;
+    variable ctrl_word : natural;
+  begin
+    if rising_edge(cpu_clk) then
+      -- When both have new transactions, compare addresses
+      if cpu_arvalid = '1' and cpu_arready = '1' and
+         bram_ctrl_arvalid = '1' and bram_ctrl_arready = '1' then
+        cpu_word := to_integer(unsigned(cpu_araddr(13 downto 2)));
+        ctrl_word := to_integer(unsigned(bram_ctrl_araddr(14 downto 2)));
+
+        if cpu_word /= ctrl_word then
+          report "*** ADDRESS MISMATCH: CPU word=" & integer'image(cpu_word) &
+                 " vs BRAM_CTRL word=" & integer'image(ctrl_word) & " ***"
+            severity error;
+        end if;
+      end if;
+    end if;
+  end process addr_compare_monitor;
 
 end architecture sim;

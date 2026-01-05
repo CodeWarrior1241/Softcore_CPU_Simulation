@@ -85,12 +85,12 @@ The 8KB internal data memory is organized as follows:
 
 ```
 0x80000000  +─────────────────+  RAM base
-            │     .data       │  Initialized global variables
+            │     .data       │  Initialized global variables that are explicitly initialized
             ├─────────────────┤
             │     .bss        │  Uninitialized globals (iq_buffer, etc.)
             │                 │  ~4.3 KB
             ├─────────────────┤
-            │     .heap       │  Dynamic allocation (grows upward)
+            │     .heap       │  Dynamic allocation such as malloc() etc. (grows upward)
             │        ↓        │
             │                 │
             │    (free)       │  ~3.7 KB available

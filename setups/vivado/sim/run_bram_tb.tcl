@@ -15,6 +15,7 @@
 # This script sets up and runs the BRAM readback testbench simulation
 # which verifies the complete AXI path to the BRAM.
 # This mirrors the actual hardware path used by the CPU.
+# The AXI-MM Master BFM was written specifically for this test.
 #
 # ==============================================================================
 # Block Diagram
@@ -54,21 +55,30 @@
 #  +---------------------+---------------------+
 #                        |
 #                        | BRAM_PORTA (15-bit byte addr)
-#                        | [14:2] -> 13-bit word addr
+#                        | -> zero-extended to 32-bit
 #                        v
 #  +-------------------------------------------+
 #  |       Top_QPSK_Snapshot_BRAM_0            |
-#  |          (Block Memory Gen)               |
+#  |    (Block Memory Gen - Standalone)        |
 #  |                                           |
-#  |  - 8192 x 32-bit words                    |
-#  |  - Initialized from COE                   |
+#  |  - 8192 x 32-bit words (32KB)             |
+#  |  - Initialized from COE file              |
 #  |  - QPSK IQ samples                        |
+#  |  - 32-bit address, 4-bit byte enables     |
+#  |  - Internal byte-to-word conversion       |
 #  +-------------------------------------------+
 #
 # Address Map:
 #   Base: 0xC0000000
 #   Size: 32KB (8192 words x 4 bytes)
 #   End:  0xC0007FFF
+#
+# BRAM Mode: Standalone with 32-bit addressing
+#   The BRAM IP is configured for Standalone mode to allow COE initialization:
+#   - It accepts 32-bit byte addresses (zero-extended from controller's 15-bit)
+#   - It uses 4-bit byte-enable writes (wea[3:0])
+#   - Internal logic handles byte-to-word address conversion
+#   - COE file provides initial QPSK IQ data for simulation
 #
 # ==============================================================================
 

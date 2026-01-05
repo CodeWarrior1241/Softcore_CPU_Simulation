@@ -270,6 +270,7 @@ set_property -dict [list \
 # Create the AXI BRAM controller and the BRAM block itself
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_bram_ctrl:4.1 $axi_bram_controller
 set_property CONFIG.SINGLE_PORT_BRAM {1} [get_bd_cells $axi_bram_controller]
+set_property CONFIG.READ_LATENCY {2} [get_bd_cells $axi_bram_controller]
 create_bd_cell -type ip -vlnv xilinx.com:ip:blk_mem_gen:8.4 $qpsk_snapshot_bram
 set_property -dict [list CONFIG.Enable_32bit_Address.VALUE_SRC PROPAGATED] [get_bd_cells $qpsk_snapshot_bram]
 
@@ -279,6 +280,8 @@ set_property -dict [list \
     CONFIG.Coe_File $coe_file \
     CONFIG.Load_Init_File {true} \
     CONFIG.use_bram_block {Stand_Alone} \
+    CONFIG.Enable_32bit_Address {true} \
+    CONFIG.EN_SAFETY_CKT {false} \
     CONFIG.Fill_Remaining_Memory_Locations {true} \
     CONFIG.Remaining_Memory_Locations {FF} \
 ] [get_bd_cells $qpsk_snapshot_bram]
