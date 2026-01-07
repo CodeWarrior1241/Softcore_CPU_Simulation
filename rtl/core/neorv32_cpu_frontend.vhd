@@ -7,7 +7,7 @@
 -- -------------------------------------------------------------------------------- --
 -- The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              --
 -- Copyright (c) NEORV32 contributors.                                              --
--- Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  --
+-- Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  --
 -- Licensed under the BSD-3-Clause license, see LICENSE for details.                --
 -- SPDX-License-Identifier: BSD-3-Clause                                            --
 -- ================================================================================ --
@@ -34,7 +34,7 @@ entity neorv32_cpu_frontend is
     ibus_req_o : out bus_req_t; -- request
     ibus_rsp_i : in  bus_rsp_t; -- response
     -- PMP interface --
-    pmp_addr_o : out std_ulogic_vector(XLEN-1 downto 0); -- access address
+    pmp_addr_o : out std_ulogic_vector(31 downto 0); -- access address
     pmp_priv_o : out std_ulogic; -- access privilege level
     pmp_err_i  : in  std_ulogic; -- PMP access fault
     -- back-end interface --
@@ -68,7 +68,7 @@ architecture neorv32_cpu_frontend_rtl of neorv32_cpu_frontend is
   type fetch_t is record
     state : state_t;
     reset : std_ulogic; -- buffered restart request (after branch)
-    addr  : std_ulogic_vector(XLEN-1 downto 0); -- fetch address
+    addr  : std_ulogic_vector(31 downto 0); -- fetch address
     priv  : std_ulogic; -- fetch privilege level
     debug : std_ulogic; -- debug-mode access
   end record;
@@ -153,21 +153,21 @@ begin
   restart <= fetch.reset or ctrl_i.if_reset;
 
   -- PMP interface --
-  pmp_addr_o <= fetch.addr(XLEN-1 downto 2) & "00"; -- word aligned
+  pmp_addr_o <= fetch.addr(31 downto 2) & "00"; -- word aligned
   pmp_priv_o <= fetch.priv;
 
   -- instruction bus request --
   ibus_req_o.meta  <= std_ulogic_vector(to_unsigned(HART_ID, 2)) & fetch.debug & fetch.priv & '1';
-  ibus_req_o.addr  <= fetch.addr(XLEN-1 downto 2) & "00"; -- word aligned
+  ibus_req_o.addr  <= fetch.addr(31 downto 2) & "00"; -- word aligned
   ibus_req_o.stb   <= '1' when (fetch.state = S_REQUEST) and (ipb.free = "11") else '0';
-  ibus_req_o.data  <= (others => '0');  -- read-only
-  ibus_req_o.ben   <= (others => '1');  -- always full-word access
-  ibus_req_o.rw    <= '0';              -- read-only
-  ibus_req_o.amo   <= '0';              -- cannot be an atomic memory operation
-  ibus_req_o.amoop <= (others => '0');  -- cannot be an atomic memory operation
-  ibus_req_o.burst <= '0';              -- only single-access
-  ibus_req_o.lock  <= '0';              -- always unlocked access
-  ibus_req_o.fence <= ctrl_i.if_fence;  -- fence request, valid without STB being set ("out-of-band" signal)
+  ibus_req_o.data  <= (others => '0'); -- read-only
+  ibus_req_o.ben   <= (others => '1'); -- always full-word access
+  ibus_req_o.rw    <= '0';             -- read-only
+  ibus_req_o.amo   <= '0';             -- cannot be an atomic memory operation
+  ibus_req_o.amoop <= (others => '0'); -- cannot be an atomic memory operation
+  ibus_req_o.burst <= '0';             -- only single-access
+  ibus_req_o.lock  <= '0';             -- always unlocked access
+  ibus_req_o.fence <= ctrl_i.if_fence; -- fence request, valid without STB being set ("out-of-band" signal)
 
   -- IPB instruction data and status --
   ipb.wdata(0) <= (ibus_rsp_i.err or pmp_err_i) & ibus_rsp_i.data(15 downto 0);
@@ -176,7 +176,6 @@ begin
   -- IPB write enable --
   ipb.we(0) <= '1' when (fetch.state = S_PENDING) and (ibus_rsp_i.ack = '1') and ((fetch.addr(1) = '0') or (not RISCV_C)) else '0';
   ipb.we(1) <= '1' when (fetch.state = S_PENDING) and (ibus_rsp_i.ack = '1') else '0';
-
 
   -- Instruction Prefetch Buffer (FIFO) -----------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -203,7 +202,6 @@ begin
     );
   end generate;
 
-
   -- ******************************************************************************************************************
   -- Instruction Issue (decompress 16-bit instruction and/or assemble a 32-bit instruction word)
   -- ******************************************************************************************************************
@@ -224,7 +222,6 @@ begin
 
     -- half-word select --
     cmd16 <= ipb.rdata(0)(15 downto 0) when (align_q = '0') else ipb.rdata(1)(15 downto 0);
-
 
     -- Issue Engine FSM -----------------------------------------------------------------------
     -- -------------------------------------------------------------------------------------------

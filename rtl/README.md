@@ -6,6 +6,9 @@ This folder contains the core VHDL files for the NEORV32 CPU and the NEORV32 Pro
 When creating a new synthesis/simulation project make sure to add all `*.vhd` files from this
 folder to a **new design library** called `neorv32`.
 
+* CPU top: [`neorv32_cpu.vhd`](core/neorv32_cpu.vhd)
+* SoC top: [`neorv32_top.vhd`](core/neorv32_top.vhd)
+
 > [!TIP]
 > Two file-list files (`*.f`) are provided that list all required rtl files for the CPU core and
 for the entire processor including their recommended compile order.
@@ -26,5 +29,5 @@ See the folder's README for more information. Note that these test setups are us
 
 ### > [`verilog`](verilog)
 
-Convert a pre-configured NEORV32 wrapper into an **all-Verilog** design and simulate it with
+Convert a pre-configured NEORV32 wrapper into an **all-Verilog** design and test it with
 Icarus Verilog and Verilator.

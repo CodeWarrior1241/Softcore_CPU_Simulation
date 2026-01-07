@@ -46,12 +46,12 @@ end neorv32_prim_fifo;
 architecture neorv32_prim_fifo_rtl of neorv32_prim_fifo is
 
   -- memory core --
-  type ram_t is array (0 to (2**AWIDTH)-1) of std_ulogic_vector(DWIDTH-1 downto 0);
+  type ram_t is array ((2**AWIDTH)-1 downto 0) of std_ulogic_vector(DWIDTH-1 downto 0);
   signal fifo : ram_t;
 
   -- local signals --
   signal rdata : std_ulogic_vector(DWIDTH-1 downto 0);
-  signal we, re, ram_re, match, full, empty, avail : std_ulogic;
+  signal we, re, match, full, empty, avail : std_ulogic;
   signal w_pnt, w_nxt, r_pnt, r_nxt : std_ulogic_vector(AWIDTH downto 0);
 
 begin
@@ -185,7 +185,7 @@ end neorv32_prim_spram;
 
 architecture neorv32_prim_spram_rtl of neorv32_prim_spram is
 
-  type ram_t is array (0 to (2**AWIDTH)-1) of std_ulogic_vector(DWIDTH-1 downto 0);
+  type ram_t is array ((2**AWIDTH)-1 downto 0) of std_ulogic_vector(DWIDTH-1 downto 0);
   signal spram : ram_t;
   signal rdata : std_ulogic_vector(DWIDTH-1 downto 0);
 
@@ -268,7 +268,7 @@ end neorv32_prim_sdpram;
 
 architecture neorv32_prim_sdpram_rtl of neorv32_prim_sdpram is
 
-  type ram_t is array (0 to (2**AWIDTH)-1) of std_ulogic_vector(DWIDTH-1 downto 0);
+  type ram_t is array ((2**AWIDTH)-1 downto 0) of std_ulogic_vector(DWIDTH-1 downto 0);
   signal sdpram : ram_t;
   signal a_rdata, b_rdata : std_ulogic_vector(DWIDTH-1 downto 0);
 
@@ -387,7 +387,7 @@ end neorv32_prim_mul_rtl;
 
 
 -- ================================================================================ --
--- NEORV32 - Primitives - Generic 64-Bit Counter Module                             --
+-- NEORV32 - Primitives - Generic Counter Module                                    --
 -- -------------------------------------------------------------------------------- --
 -- High and low words are split across two individual registers to improve timing   --
 -- by cutting the carry chain. The actual counter width can be trimmed via CWIDTH.  --
@@ -424,7 +424,7 @@ end neorv32_prim_cnt;
 architecture neorv32_prim_cnt_rtl of neorv32_prim_cnt is
 
   signal count : std_ulogic_vector(63 downto 0);
-  signal carry, inc : std_ulogic_vector(0 downto 0);
+  signal carry, incen : std_ulogic_vector(0 downto 0);
   signal inc_lo, inc_hi : std_ulogic_vector(32 downto 0);
 
 begin
@@ -434,16 +434,20 @@ begin
   counter_core: process(rstn_i, clk_i)
   begin
     if (rstn_i = '0') then
+      incen <= (others => '0');
       count <= (others => '0');
       carry <= (others => '0');
     elsif rising_edge(clk_i) then
+      -- increment enable --
+      incen(0) <= inc_i;
       -- low-word --
       if (we_i(0) = '1') then
         count(31 downto 0) <= data_i;
       else
         count(31 downto 0) <= inc_lo(31 downto 0);
       end if;
-      carry(0) <= inc_lo(32); -- low-to-high carry
+      -- low-to-high carry --
+      carry(0) <= inc_lo(32);
       -- high-word --
       if (we_i(1) = '1') then
         count(63 downto 32) <= data_i;
@@ -454,8 +458,7 @@ begin
   end process counter_core;
 
   -- increments --
-  inc(0) <= inc_i;
-  inc_lo <= std_ulogic_vector(unsigned('0' & count(31 downto  0)) + unsigned(inc));
+  inc_lo <= std_ulogic_vector(unsigned('0' & count(31 downto  0)) + unsigned(incen));
   inc_hi <= std_ulogic_vector(unsigned('0' & count(63 downto 32)) + unsigned(carry));
 
   -- Output Gating and Trimming -------------------------------------------------------------
@@ -464,7 +467,7 @@ begin
   begin
     cnt_o <= (others => '0');
     if (oe_i = '1') then
-      cnt_o(CWIDTH-1 downto 0) <= count(CWIDTH-1 downto 0); -- unconnected counter bits should be optimized away
+      cnt_o(CWIDTH-1 downto 0) <= count(CWIDTH-1 downto 0);
     end if;
   end process trim;
 

@@ -164,9 +164,9 @@ to all inputs and output so the synthesis tool can insert an explicit IO (bounda
 5+^| **<<_core_local_interruptor_clint>>**
 | `mtime_time_o`   | 64 | out |   -   | CLINT.MTIMER system time output
 5+^| **RISC-V Machine-Mode <<_processor_interrupts>>**
-| `mtime_irq_i`    |  1 |  in | `'L'` | machine timer interrupt (RISC-V), high-level-active; for chip-internal usage only
-| `msw_irq_i`      |  1 |  in | `'L'` | machine software interrupt (RISC-V), high-level-active; for chip-internal usage only
-| `mext_irq_i`     |  1 |  in | `'L'` | machine external interrupt (RISC-V), high-level-active; for chip-internal usage only
+| `irq_msi_i`      |  1 |  in | `'L'` | machine software interrupt (RISC-V), high-level-active; available only if CLINT is not enabled
+| `irw_mti_i`      |  1 |  in | `'L'` | machine timer interrupt (RISC-V), high-level-active; available only if CLINT is not enabled
+| `irq_mei_i`      |  1 |  in | `'L'` | machine external interrupt (RISC-V), high-level-active
 |=======================
 
 
@@ -216,7 +216,7 @@ The generic type "`suv(x:y)`" is an abbreviation for "`std_ulogic_vector(x downt
 | `OCD_EN`                | boolean   | false         | Implement the on-chip debugger and the CPU debug mode (<<_sdext_isa_extension>>).
 | `OCD_NUM_HW_TRIGGERS`   | natural   | 0             | Number of implemented HW triggers (<<_trigger_module>> / <<_sdtrig_isa_extension>>) for hardware break-/watchpoints (0..16).
 | `OCD_AUTHENTICATION`    | boolean   | false         | Implement <<_debug_authentication>> module.
-| `OCD_JEDEC_ID`          | suv(10:0) | "00000000000" | JEDEC ID; continuation codes plus vendor ID (passed to the JTAG <<_debug_transport_module_dtm>>).
+| `OCD_JEDEC_ID`          | suv(10:0) | "00000000000" | JEDEC ID: continuation codes plus vendor ID.
 4+^| **CPU <<_instruction_sets_and_extensions>>**
 | `RISCV_ISA_C`           | boolean   | false         | Enable <<_c_isa_extension>> (compressed instructions).
 | `RISCV_ISA_E`           | boolean   | false         | Enable <<_e_isa_extension>> (reduced register file size).
@@ -244,11 +244,12 @@ The generic type "`suv(x:y)`" is an abbreviation for "`std_ulogic_vector(x downt
 | `RISCV_ISA_Zksh`        | boolean   | false         | Enable <<_zksh_isa_extension>> (scalar cryptography ShangMi hash functions).
 | `RISCV_ISA_Zmmul`       | boolean   | false         | Enable <<_zmmul_isa_extension>> (hardware-based integer multiplication).
 | `RISCV_ISA_Zxcfu`       | boolean   | false         | Enable NEORV32-specific <<_zxcfu_isa_extension>> (custom RISC-V instructions).
+| `RISCV_ISA_Smcntrpmf`   | boolean   | false         | Enable <<_smcntrpmf_isa_extension>> (counter privilege-mode filtering).
 4+^| **<<_cpu_tuning_options>>**
 | `CPU_CONSTT_BR_EN`      | boolean   | false         | Implement constant-time branches (same execution times for taken and not-taken branches).
 | `CPU_FAST_MUL_EN`       | boolean   | false         | Implement fast but large full-parallel multipliers (trying to infer DSP blocks); see section <<_cpu_arithmetic_logic_unit>>.
 | `CPU_FAST_SHIFT_EN`     | boolean   | false         | Implement fast but large full-parallel barrel shifters; see section <<_cpu_arithmetic_logic_unit>>.
-| `CPU_RF_HW_RST_EN`      | boolean   | false         | Implement full hardware reset for register file (use individual FFs instead of BRAM); see section <<_cpu_register_file>>.
+| `CPU_RF_ARCH_SEL`       | natural   | 0             | CPU register file implementation style select; see section <<_cpu_register_file>>.
 4+^| **Physical Memory Protection (<<_smpmp_isa_extension>>)**
 | `PMP_NUM_REGIONS`       | natural   | 0             | Number of implemented PMP regions (0..16).
 | `PMP_MIN_GRANULARITY`   | natural   | 4             | Minimal region granularity in bytes. Has to be a power of two, min 4.

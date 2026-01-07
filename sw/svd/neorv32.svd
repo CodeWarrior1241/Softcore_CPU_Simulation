@@ -4,7 +4,7 @@
   <vendor>github.com/stnolting/neorv32</vendor>
   <name>neorv32</name>
   <series>RISC-V</series>
-  <version>1.12.5</version>
+  <version>1.12.6</version>
   <description>The NEORV32 RISC-V Processor</description>
 
   <!-- CPU core -->
@@ -462,6 +462,7 @@
           <description>Channel configuration register</description>
           <register>
             <name>TOPCMP</name>
+            <description>Channel counter full word access alias</description>
             <addressOffset>0x0</addressOffset>
             <fields>
               <field>
@@ -1610,6 +1611,7 @@
             <field><name>SYSINFO_SOC_IO_GPTMR</name><bitRange>[28:28]</bitRange><description>General purpose timer implemented</description></field>
             <field><name>SYSINFO_SOC_IO_SLINK</name><bitRange>[29:29]</bitRange><description>Stream link interface implemented</description></field>
             <field><name>SYSINFO_SOC_IO_ONEWIRE</name><bitRange>[30:30]</bitRange><description>1-wire interface controller implemented</description></field>
+            <field><name>SYSINFO_SOC_SIM</name><bitRange>[31:31]</bitRange><description>Set if this is a simulation</description></field>
           </fields>
         </register>
         <register>

@@ -29,7 +29,18 @@ mimpid = 0x01040312 -> Version 01.04.03.12 -> v1.4.3.12
 
 | Date | Version | Comment | Ticket |
 |:----:|:-------:|:--------|:------:|
-| 14.12.2025 | 1.12.5.5 | CPU control: massive code refactoring and optimization | [#1449](https://github.com/stnolting/neorv32/pull/1449)  <
+| 04.01.2026 | 1.12.6.6 | :bug: fix bus time-out bug introduced in v1.12.6.4; minor rtl optimizations | [#1470](https://github.com/stnolting/neorv32/pull/1470) |
+| 02.01.2026 | 1.12.6.5 | minor rtl edits; optimize register file's mapping to FPGA BRAM | [#1467](https://github.com/stnolting/neorv32/pull/1467) |
+| 30.12.2025 | 1.12.6.4 | minor rtl edits, cleanups and optimizations | [#1465](https://github.com/stnolting/neorv32/pull/1465) |
+| 29.12.2025 | 1.12.6.3 | :sparkles: add support for RISC-V `Smcntrpmf` ISA extension (counter privilege-mode filtering) | [#1464](https://github.com/stnolting/neorv32/pull/1464) |
+| 28.12.2025 | 1.12.6.2 | :warning: HPM: remove "trap" event select; replace "taken branch" event by "control flow transfer" event | [#1463](https://github.com/stnolting/neorv32/pull/1463) |
+| 27.12.2025 | 1.12.6.1 | rtl edits, cleanups and optimizations | [#1462](https://github.com/stnolting/neorv32/pull/1462) |
+| 27.12.2025 | [**1.12.6**](https://github.com/stnolting/neorv32/releases/tag/v1.12.6) | :rocket: **New release** | |
+| 24.12.2025 | 1.12.5.9 | minor rtl cleanups | [#1461](https://github.com/stnolting/neorv32/pull/1461) |
+| 23.12.2025 | 1.12.5.8 | :sparkles: add new tuning option `CPU_RF_ARCH_SEL` to select implementation style of CPU register file (FPGA block RAM, FPGA distributed RAM, individual FFs, individual latches) | [#1460](https://github.com/stnolting/neorv32/pull/1460) |
+| 21.12.2025 | 1.12.5.7 | :warning: remove `mxcsr` CSR | [#1459](https://github.com/stnolting/neorv32/pull/1459) |
+| 19.12.2025 | 1.12.5.6 | further CPU code cleanups | [#1456](https://github.com/stnolting/neorv32/pull/1456) |
+| 14.12.2025 | 1.12.5.5 | CPU control: massive code refactoring and optimization | [#1449](https://github.com/stnolting/neorv32/pull/1449) |
 | 07.12.2025 | 1.12.5.4 | :sparkles: PWM: add optional phase-correct operation mode | [#1445](https://github.com/stnolting/neorv32/pull/1445) |
 | 06.12.2025 | 1.12.5.3 | minor rtl edits and cleanups | [#1444](https://github.com/stnolting/neorv32/pull/1444) |
 | 05.12.2025 | 1.12.5.2 | :warning: remove UART0/1 simulation-mode **file** logging | [#1443](https://github.com/stnolting/neorv32/pull/1443) |

@@ -137,8 +137,8 @@ proc setup_ip_gui {} {
   set_property enablement_dependency {$IO_CFS_EN}     [ipx::get_ports cfs_*            -of_objects [ipx::current_core]]
   set_property enablement_dependency {$IO_NEOLED_EN}  [ipx::get_ports neoled_o         -of_objects [ipx::current_core]]
   set_property enablement_dependency {$IO_CLINT_EN}   [ipx::get_ports mtime_time_o     -of_objects [ipx::current_core]]
-  set_property enablement_dependency {!$IO_CLINT_EN}  [ipx::get_ports mtime_irq_i      -of_objects [ipx::current_core]]
-  set_property enablement_dependency {!$IO_CLINT_EN}  [ipx::get_ports msw_irq_i        -of_objects [ipx::current_core]]
+  set_property enablement_dependency {!$IO_CLINT_EN}  [ipx::get_ports irw_mti_i        -of_objects [ipx::current_core]]
+  set_property enablement_dependency {!$IO_CLINT_EN}  [ipx::get_ports irq_msi_i        -of_objects [ipx::current_core]]
 
 
   # **************************************************************
@@ -251,10 +251,11 @@ proc setup_ip_gui {} {
 
   set group [add_group $page {Counters and Timers}]
   add_params $group {
-    { RISCV_ISA_Zicntr {Zicntr - Base counters (cycles and instructions)} {} }
-    { RISCV_ISA_Zihpm  {Zihpm - Hardware performance monitors (HPMs)}     {} }
-    { HPM_CNT_WIDTH    {HPM width}                                        {Counter width in bits}  {$RISCV_ISA_Zihpm} }
-    { HPM_NUM_CNTS     {HPM counters}                                     {Number of HPM counters} {$RISCV_ISA_Zihpm} }
+    { RISCV_ISA_Zicntr    {Zicntr - Base counters (cycles and instructions)} {} }
+    { RISCV_ISA_Smcntrpmf {Smcntrpmf - Counter privilege-mode filtering}     {} }
+    { RISCV_ISA_Zihpm     {Zihpm - Hardware performance monitors (HPMs)}     {} }
+    { HPM_CNT_WIDTH       {HPM width}                                        {Counter width in bits}  {$RISCV_ISA_Zihpm} }
+    { HPM_NUM_CNTS        {HPM counters}                                     {Number of HPM counters} {$RISCV_ISA_Zihpm} }
   }
 
   set group [add_group $page {Bit-Manipulation}]
@@ -302,11 +303,14 @@ proc setup_ip_gui {} {
 
   set group [add_group $page {Tuning Options}]
   add_params $group {
-    { CPU_CONSTT_BR_EN  {Constant-time branches}                {Identical execution times for taken and not-taken branches} }
-    { CPU_FAST_MUL_EN   {DSP-based multiplier}                  {Use DSP block instead of bit-serial multipliers} }
-    { CPU_FAST_SHIFT_EN {Barrel shifter}                        {Use full-parallel shifters instead of of bit-serial shifters} }
-    { CPU_RF_HW_RST_EN  {Full hardware reset for register file} {Implement register file with FFs instead of BRAM to allow full hardware reset} }
+    { CPU_CONSTT_BR_EN  {Constant-time branches} {Identical execution times for taken and not-taken branches} }
+    { CPU_FAST_MUL_EN   {DSP-based multiplier}   {Use DSP block instead of bit-serial multipliers} }
+    { CPU_FAST_SHIFT_EN {Barrel shifter}         {Use full-parallel shifters instead of of bit-serial shifters} }
+    { CPU_RF_ARCH_SEL   {Register file style}    {Select implementation style of CPU register file} }
   }
+  set_property widget {comboBox} [ipgui::get_guiparamspec -name "CPU_RF_ARCH_SEL" -component [ipx::current_core] ]
+  set_property value_validation_type pairs [ipx::get_user_parameters CPU_RF_ARCH_SEL -of_objects [ipx::current_core]]
+  set_property value_validation_pairs {{Block RAM} 0 {Distributed RAM} 1 {FFs with reset} 2 {Latches} 3} [ipx::get_user_parameters CPU_RF_ARCH_SEL -of_objects [ipx::current_core]]
 
 
   # **************************************************************

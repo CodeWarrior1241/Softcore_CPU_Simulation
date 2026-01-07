@@ -31,13 +31,13 @@ entity neorv32_cpu_pmp is
     clk_i    : in  std_ulogic; -- global clock, rising edge
     rstn_i   : in  std_ulogic; -- global reset, low-active, async
     ctrl_i   : in  ctrl_bus_t; -- main control bus
-    csr_o    : out std_ulogic_vector(XLEN-1 downto 0); -- CSR read data
+    csr_o    : out std_ulogic_vector(31 downto 0); -- CSR read data
     -- instruction access check --
-    i_addr_i : in  std_ulogic_vector(XLEN-1 downto 0); -- access address
+    i_addr_i : in  std_ulogic_vector(31 downto 0); -- access address
     i_priv_i : in  std_ulogic; -- access privilege
     i_err_o  : out std_ulogic; -- PMP fault
     -- data access check --
-    d_addr_i : in  std_ulogic_vector(XLEN-1 downto 0); -- access address
+    d_addr_i : in  std_ulogic_vector(31 downto 0); -- access address
     d_priv_i : in  std_ulogic; -- access privilege
     d_err_o  : out std_ulogic  -- PMP fault
   );
@@ -71,25 +71,28 @@ architecture neorv32_cpu_pmp_rtl of neorv32_cpu_pmp is
   signal pmpcfg_we : std_ulogic_vector(3 downto 0);
 
   -- address CSRs --
-  type pmpaddr_t is array (0 to NUM_REGIONS-1) of std_ulogic_vector(XLEN-1 downto 0);
+  type pmpaddr_t is array (0 to NUM_REGIONS-1) of std_ulogic_vector(31 downto 0);
   signal pmpaddr    : pmpaddr_t;
   signal pmpaddr_we : std_ulogic_vector(15 downto 0);
 
   -- CSR read-back --
   type csr_cfg_rd_t   is array (0 to 15) of std_ulogic_vector(7 downto 0);
-  type csr_cfg_rd32_t is array (0 to 03) of std_ulogic_vector(XLEN-1 downto 0);
-  type csr_addr_rd_t  is array (0 to 15) of std_ulogic_vector(XLEN-1 downto 0);
+  type csr_cfg_rd32_t is array (0 to 03) of std_ulogic_vector(31 downto 0);
+  type csr_addr_rd_t  is array (0 to 15) of std_ulogic_vector(31 downto 0);
   signal cfg_rd   : csr_cfg_rd_t;
   signal cfg_rd32 : csr_cfg_rd32_t;
   signal addr_rd  : csr_addr_rd_t;
 
   -- address mask (NA4/NAPOT) --
-  type addr_mask_t is array (0 to NUM_REGIONS-1) of std_ulogic_vector(XLEN-1 downto pmp_lsb_c);
+  type addr_mask_t is array (0 to NUM_REGIONS-1) of std_ulogic_vector(31 downto pmp_lsb_c);
   signal addr_mask_napot, addr_mask : addr_mask_t;
 
   -- address comparators, region-match and permission check --
   type cmp_t is array (0 to NUM_REGIONS-1) of std_ulogic_vector(1 downto 0); -- 0 = instruction fetch, 1 = data access
-  signal cmp_na, cmp_ge, cmp_lt, match, allow : cmp_t;
+  signal cmp_na, cmp_ge, cmp_lt, match : cmp_t;
+
+  -- permission check --
+  signal allow_ex, allow_rw : std_ulogic_vector(NUM_REGIONS-1 downto 0);
 
   -- access check prioritizing logic --
   signal fail_ex, fail_rw : std_ulogic_vector(NUM_REGIONS downto 0);
@@ -167,10 +170,10 @@ begin
         if (pmpaddr_we(i) = '1') and (pmpcfg(i)(cfg_l_c) = '0') then -- unlocked write access
           if (i < NUM_REGIONS-1) then
             if (pmpcfg(i+1)(cfg_l_c) = '0') or (pmpcfg(i+1)(cfg_ah_c downto cfg_al_c) /= mode_tor_c) then -- pmpcfg(i+1) not "LOCKED TOR"
-              pmpaddr(i) <= "00" & ctrl_i.csr_wdata(XLEN-3 downto 0);
+              pmpaddr(i) <= "00" & ctrl_i.csr_wdata(29 downto 0);
             end if;
           else -- very last entry
-            pmpaddr(i) <= "00" & ctrl_i.csr_wdata(XLEN-3 downto 0);
+            pmpaddr(i) <= "00" & ctrl_i.csr_wdata(29 downto 0);
           end if;
         end if;
       end if;
@@ -202,7 +205,7 @@ begin
     address_read_back: process(pmpaddr, pmpcfg)
     begin
       addr_rd(i) <= (others => '0');
-      addr_rd(i)(XLEN-3 downto pmp_lsb_c-2) <= pmpaddr(i)(XLEN-3 downto pmp_lsb_c-2);
+      addr_rd(i)(29 downto pmp_lsb_c-2) <= pmpaddr(i)(29 downto pmp_lsb_c-2);
       if (g_c = 8) and TOR_EN then -- bit G-1 reads as zero in TOR or OFF mode
         if (pmpcfg(i)(cfg_ah_c) = '0') then -- TOR/OFF mode
           addr_rd(i)(pmp_lsb_c) <= '0';
@@ -242,7 +245,7 @@ begin
     -- NAPOT address mask generator --
     addr_mask_napot(r)(pmp_lsb_c) <= '0';
     addr_mask_napot_gen:
-    for i in pmp_lsb_c+1 to XLEN-1 generate
+    for i in pmp_lsb_c+1 to 31 generate
       addr_mask_napot(r)(i) <= addr_mask_napot(r)(i-1) or (not pmpaddr(r)(i-3));
     end generate;
 
@@ -267,15 +270,15 @@ begin
   end generate;
 
 
-  -- Region Access and Permission Check Logic -----------------------------------------------
+  -- Region Access Check --------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
   region_gen:
   for r in 0 to NUM_REGIONS-1 generate
 
     -- check region address match --
     -- NA4 and NAPOT --
-    cmp_na(r)(0) <= '1' when ((i_addr_i(XLEN-1 downto pmp_lsb_c) and addr_mask(r)) = (pmpaddr(r)(XLEN-3 downto pmp_lsb_c-2) and addr_mask(r))) and NAP_EN else '0';
-    cmp_na(r)(1) <= '1' when ((d_addr_i(XLEN-1 downto pmp_lsb_c) and addr_mask(r)) = (pmpaddr(r)(XLEN-3 downto pmp_lsb_c-2) and addr_mask(r))) and NAP_EN else '0';
+    cmp_na(r)(0) <= '1' when ((i_addr_i(31 downto pmp_lsb_c) and addr_mask(r)) = (pmpaddr(r)(29 downto pmp_lsb_c-2) and addr_mask(r))) and NAP_EN else '0';
+    cmp_na(r)(1) <= '1' when ((d_addr_i(31 downto pmp_lsb_c) and addr_mask(r)) = (pmpaddr(r)(29 downto pmp_lsb_c-2) and addr_mask(r))) and NAP_EN else '0';
     -- TOR region 0 --
     addr_match_r0_gen:
     if (r = 0) generate -- first entry: use ZERO as base and current entry as bound
@@ -285,12 +288,11 @@ begin
     -- TOR region above 0 --
     addr_match_rn_gen:
     if (r > 0) generate -- use previous entry as base and current entry as bound
-      cmp_ge(r)(0) <= '1' when (unsigned(i_addr_i(XLEN-1 downto pmp_lsb_c)) >= unsigned(pmpaddr(r-1)(XLEN-3 downto pmp_lsb_c-2))) and TOR_EN else '0';
-      cmp_lt(r)(0) <= '1' when (unsigned(i_addr_i(XLEN-1 downto pmp_lsb_c)) <  unsigned(pmpaddr(r  )(XLEN-3 downto pmp_lsb_c-2))) and TOR_EN else '0';
-      cmp_ge(r)(1) <= '1' when (unsigned(d_addr_i(XLEN-1 downto pmp_lsb_c)) >= unsigned(pmpaddr(r-1)(XLEN-3 downto pmp_lsb_c-2))) and TOR_EN else '0';
-      cmp_lt(r)(1) <= '1' when (unsigned(d_addr_i(XLEN-1 downto pmp_lsb_c)) <  unsigned(pmpaddr(r  )(XLEN-3 downto pmp_lsb_c-2))) and TOR_EN else '0';
+      cmp_ge(r)(0) <= '1' when (unsigned(i_addr_i(31 downto pmp_lsb_c)) >= unsigned(pmpaddr(r-1)(29 downto pmp_lsb_c-2))) and TOR_EN else '0';
+      cmp_lt(r)(0) <= '1' when (unsigned(i_addr_i(31 downto pmp_lsb_c)) <  unsigned(pmpaddr(r  )(29 downto pmp_lsb_c-2))) and TOR_EN else '0';
+      cmp_ge(r)(1) <= '1' when (unsigned(d_addr_i(31 downto pmp_lsb_c)) >= unsigned(pmpaddr(r-1)(29 downto pmp_lsb_c-2))) and TOR_EN else '0';
+      cmp_lt(r)(1) <= '1' when (unsigned(d_addr_i(31 downto pmp_lsb_c)) <  unsigned(pmpaddr(r  )(29 downto pmp_lsb_c-2))) and TOR_EN else '0';
     end generate;
-
 
     -- check region match according to configured mode --
     match_gen: process(pmpcfg, cmp_ge, cmp_lt, cmp_na)
@@ -308,44 +310,29 @@ begin
       end if;
     end process match_gen;
 
-
-    -- check region permissions --
-    perm_gen: process(ctrl_i, i_priv_i, d_priv_i, pmpcfg)
-    begin
-      allow(r) <= (others => '1'); -- default: I/D allowed
-      -- execute (X) --
-      if (i_priv_i = priv_mode_u_c) or (pmpcfg(r)(cfg_l_c) = '1') then
-        allow(r)(0) <= pmpcfg(r)(cfg_x_c);
-      end if;
-      -- read/write (RW) --
-      if (ctrl_i.lsu_rmw = '1') then -- read-modify-write
-        if (d_priv_i = priv_mode_u_c) or (pmpcfg(r)(cfg_l_c) = '1') then
-          allow(r)(1) <= pmpcfg(r)(cfg_r_c) and pmpcfg(r)(cfg_w_c);
-        end if;
-      elsif (ctrl_i.lsu_rw = '0') then -- read
-        if (d_priv_i = priv_mode_u_c) or (pmpcfg(r)(cfg_l_c) = '1') then
-          allow(r)(1) <= pmpcfg(r)(cfg_r_c);
-        end if;
-      else -- write
-        if (d_priv_i = priv_mode_u_c) or (pmpcfg(r)(cfg_l_c) = '1') then
-          allow(r)(1) <= pmpcfg(r)(cfg_w_c);
-        end if;
-      end if;
-    end process perm_gen;
-
   end generate;
 
 
-  -- Access Permission Check (using static prioritization) ----------------------------------
+  -- Permission Check -----------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
-  fail_ex(NUM_REGIONS) <= '1' when (i_priv_i /= priv_mode_m_c) else '0'; -- default if no match: fail if not M-mode
-  fail_rw(NUM_REGIONS) <= '1' when (d_priv_i /= priv_mode_m_c) else '0'; -- default if no match: fail if not M-mode
-
-  -- prioritization logic implemented as a multiplexer chain --
-  fault_check_gen:
+  perm_gen:
   for r in NUM_REGIONS-1 downto 0 generate -- start with lowest priority
-    fail_ex(r) <= not allow(r)(0) when (match(r)(0) = '1') else fail_ex(r+1);
-    fail_rw(r) <= not allow(r)(1) when (match(r)(1) = '1') else fail_rw(r+1);
+    -- execute (X), check privilege and permission --
+    allow_ex(r) <= '1' when (i_priv_i = priv_mode_m_c) and (pmpcfg(r)(cfg_l_c) = '0') else -- grant if M and not locked
+                   pmpcfg(r)(cfg_x_c);
+    -- read/write (RW), check privilege and permission(s) according to access type --
+    allow_rw(r) <= '1' when (d_priv_i = priv_mode_m_c) and (pmpcfg(r)(cfg_l_c) = '0') else -- grant if M and not locked
+                   ((not ctrl_i.lsu_rd) or pmpcfg(r)(cfg_r_c)) and ((not ctrl_i.lsu_wr) or pmpcfg(r)(cfg_w_c));
+  end generate;
+
+  -- start of chain (lowest priority): fail if not M-mode --
+  fail_ex(NUM_REGIONS) <= '1' when (i_priv_i /= priv_mode_m_c) else '0';
+  fail_rw(NUM_REGIONS) <= '1' when (d_priv_i /= priv_mode_m_c) else '0';
+  -- prioritization logic implemented as a multiplexer chain --
+  prio_gen:
+  for r in NUM_REGIONS-1 downto 0 generate -- start with lowest priority
+    fail_ex(r) <= not allow_ex(r) when (match(r)(0) = '1') else fail_ex(r+1);
+    fail_rw(r) <= not allow_rw(r) when (match(r)(1) = '1') else fail_rw(r+1);
   end generate;
 
   -- output buffer (ignore PMP rules when in debug-mode) --

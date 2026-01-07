@@ -242,11 +242,10 @@ int main() {
     neorv32_cpu_csr_write(CSR_MHPMCOUNTER4,  0); neorv32_cpu_csr_write(CSR_MHPMEVENT4,  1 << HPMCNT_EVENT_WAIT_DIS);
     neorv32_cpu_csr_write(CSR_MHPMCOUNTER5,  0); neorv32_cpu_csr_write(CSR_MHPMEVENT5,  1 << HPMCNT_EVENT_WAIT_ALU);
     neorv32_cpu_csr_write(CSR_MHPMCOUNTER6,  0); neorv32_cpu_csr_write(CSR_MHPMEVENT6,  1 << HPMCNT_EVENT_BRANCH);
-    neorv32_cpu_csr_write(CSR_MHPMCOUNTER7,  0); neorv32_cpu_csr_write(CSR_MHPMEVENT7,  1 << HPMCNT_EVENT_BRANCHED);
+    neorv32_cpu_csr_write(CSR_MHPMCOUNTER7,  0); neorv32_cpu_csr_write(CSR_MHPMEVENT7,  1 << HPMCNT_EVENT_CTRLFLOW);
     neorv32_cpu_csr_write(CSR_MHPMCOUNTER8,  0); neorv32_cpu_csr_write(CSR_MHPMEVENT8,  1 << HPMCNT_EVENT_LOAD);
     neorv32_cpu_csr_write(CSR_MHPMCOUNTER9,  0); neorv32_cpu_csr_write(CSR_MHPMEVENT9,  1 << HPMCNT_EVENT_STORE);
     neorv32_cpu_csr_write(CSR_MHPMCOUNTER10, 0); neorv32_cpu_csr_write(CSR_MHPMEVENT10, 1 << HPMCNT_EVENT_WAIT_LSU);
-    neorv32_cpu_csr_write(CSR_MHPMCOUNTER11, 0); neorv32_cpu_csr_write(CSR_MHPMEVENT11, 1 << HPMCNT_EVENT_TRAP);
 
     // make sure there was no exception
     if (trap_cause == trap_never_c) {
@@ -445,9 +444,59 @@ int main() {
 
 
   // ----------------------------------------------------------
+  // Counter privilege-mode filtering
+  // ----------------------------------------------------------
+  PRINT("[%i] CNT priv-mode filtering ", cnt_test);
+  trap_cause = trap_never_c;
+
+  if (neorv32_cpu_csr_read(CSR_MXISA) & (1 << CSR_MXISA_SMCNTRPMF)) {
+    cnt_test++;
+
+    neorv32_cpu_csr_write(CSR_MCYCLECFGH,   1 << CSR_MCYCLECFGH_UINH);   // inhibit cycle when in user-mode
+    neorv32_cpu_csr_write(CSR_MINSTRETCFGH, 1 << CSR_MINSTRETCFGH_MINH); // inhibit instret when in machine-mode
+
+    uint32_t delta_cy_m, delta_cy_u, delta_ir_m, delta_ir_u;
+
+    // machine-mode test
+    delta_cy_m = neorv32_cpu_csr_read(CSR_CYCLE);
+    delta_ir_m = neorv32_cpu_csr_read(CSR_INSTRET);
+    asm volatile ("nop");
+    asm volatile ("nop");
+    delta_cy_m = neorv32_cpu_csr_read(CSR_CYCLE) - delta_cy_m;
+    delta_ir_m = neorv32_cpu_csr_read(CSR_INSTRET) - delta_ir_m;
+
+    // user-mode test
+    goto_user_mode();
+    {
+      delta_cy_u = neorv32_cpu_csr_read(CSR_CYCLE);
+      delta_ir_u = neorv32_cpu_csr_read(CSR_INSTRET);
+      asm volatile ("nop");
+      asm volatile ("nop");
+      delta_cy_u = neorv32_cpu_csr_read(CSR_CYCLE) - delta_cy_u;
+      delta_ir_u = neorv32_cpu_csr_read(CSR_INSTRET) - delta_ir_u;
+      asm volatile ("ecall"); // exit user-mode
+    }
+
+    if ((delta_cy_m != 0) && (delta_cy_u == 0) && (delta_ir_m == 0) && (delta_ir_u != 0)) {
+      test_ok();
+    }
+    else {
+      test_fail();
+    }
+
+    // re-enable base counters for all privilege modes
+    neorv32_cpu_csr_write(CSR_MCYCLECFGH, 0);
+    neorv32_cpu_csr_write(CSR_MINSTRETCFGH, 0);
+  }
+  else {
+    PRINT("[n.a.]\n");
+  }
+
+
+  // ----------------------------------------------------------
   // May-be-operation
   // ----------------------------------------------------------
-  PRINT("[%i] May-be-operation ", cnt_test);
+  PRINT("[%i] May-be-operations ", cnt_test);
   trap_cause = trap_never_c;
   cnt_test++;
 
@@ -504,7 +553,7 @@ int main() {
   // ----------------------------------------------------------
   PRINT("[%i] Ext. memory (@0x%x) ", cnt_test, (uint32_t)EXT_FMEM_DATA_BASE);
 
-  if ((NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_XBUS)) && (neorv32_cpu_csr_read(CSR_MXCSR) & (1 << CSR_MXCSR_ISSIM))) {
+  if ((NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_XBUS)) && neorv32_sysinfo_is_sim()) {
     trap_cause = trap_never_c;
     cnt_test++;
 
@@ -628,7 +677,7 @@ int main() {
   // ----------------------------------------------------------
   PRINT("[%i] IF access EXC ", cnt_test);
 
-  if (neorv32_cpu_csr_read(CSR_MXCSR) & (1 << CSR_MXCSR_ISSIM)) {
+  if (neorv32_sysinfo_is_sim()) {
     trap_cause = trap_never_c;
     cnt_test++;
 
@@ -657,8 +706,7 @@ int main() {
 
   // skip if C-mode is implemented
   if ((neorv32_cpu_csr_read(CSR_MISA) & (1 << CSR_MISA_C)) &&
-      (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_XBUS)) &&
-      (neorv32_cpu_csr_read(CSR_MXCSR) & (1 << CSR_MXCSR_ISSIM))) {
+      (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_XBUS)) && neorv32_sysinfo_is_sim()) {
     trap_cause = trap_never_c;
     cnt_test++;
 
@@ -761,7 +809,7 @@ int main() {
   PRINT("[%i] BREAK EXC ", cnt_test);
 
   // skip on real hardware since ebreak will make problems when running this test program via gdb
-  if (neorv32_cpu_csr_read(CSR_MXCSR) & (1 << CSR_MXCSR_ISSIM)) {
+  if (neorv32_sysinfo_is_sim()) {
     trap_cause = trap_never_c;
     cnt_test++;
 
@@ -996,7 +1044,7 @@ int main() {
   // ----------------------------------------------------------
   PRINT("[%i] MEI (sim) IRQ ", cnt_test);
 
-  if (neorv32_cpu_csr_read(CSR_MXCSR) & (1 << CSR_MXCSR_ISSIM)) {
+  if (neorv32_sysinfo_is_sim()) {
     trap_cause = trap_never_c;
     cnt_test++;
 
@@ -1101,7 +1149,7 @@ int main() {
   // ----------------------------------------------------------
   PRINT("[%i] Vectored IRQ (sim) ", cnt_test);
 
-  if (neorv32_cpu_csr_read(CSR_MXCSR) & (1 << CSR_MXCSR_ISSIM)) {
+  if (neorv32_sysinfo_is_sim()) {
     trap_cause = trap_never_c;
     cnt_test++;
 
@@ -2318,11 +2366,10 @@ int main() {
       "#04 DISP waits    : %u\n"
       "#05 ALU waits     : %u\n"
       "#06 branch instr. : %u\n"
-      "#07 taken branch  : %u\n"
+      "#07 control flow  : %u\n"
       "#08 MEM loads     : %u\n"
       "#09 MEM stores    : %u\n"
-      "#10 MEM waits     : %u\n"
-      "#11 traps         : %u\n",
+      "#10 MEM waits     : %u\n",
       neorv32_cpu_csr_read(CSR_CYCLE),
       neorv32_cpu_csr_read(CSR_INSTRET),
       neorv32_cpu_csr_read(CSR_MHPMCOUNTER3),
@@ -2332,8 +2379,7 @@ int main() {
       neorv32_cpu_csr_read(CSR_MHPMCOUNTER7),
       neorv32_cpu_csr_read(CSR_MHPMCOUNTER8),
       neorv32_cpu_csr_read(CSR_MHPMCOUNTER9),
-      neorv32_cpu_csr_read(CSR_MHPMCOUNTER10),
-      neorv32_cpu_csr_read(CSR_MHPMCOUNTER11)
+      neorv32_cpu_csr_read(CSR_MHPMCOUNTER10)
     );
   }
 
