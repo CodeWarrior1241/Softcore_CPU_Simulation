@@ -314,7 +314,6 @@ architecture sim of snapshot_bram_readback_tb is
   component Top_QPSK_Snapshot_BRAM_0
     port (
       clka  : in  std_logic;
-      rsta  : in  std_logic;
       wea   : in  std_logic_vector(3 downto 0);   -- Byte-enable writes
       addra : in  std_logic_vector(31 downto 0);  -- 32-bit byte address
       dina  : in  std_logic_vector(31 downto 0);
@@ -478,7 +477,6 @@ begin
   bram: Top_QPSK_Snapshot_BRAM_0
     port map (
       clka  => bram_clk_a,
-      rsta  => bram_rst_a,
       wea   => bram_we_a,           -- Full 4-bit byte enables
       addra => bram_addr_a_ext,     -- Zero-extended 32-bit address
       dina  => bram_wrdata_a,
@@ -627,7 +625,7 @@ begin
     -- =========================================================================
 
     -- Read NUM_SAMPLES + 1 transactions to account for pipeline latency
-    for i in 0 to NUM_SAMPLES loop
+    for i in 0 to NUM_SAMPLES - 1 loop
       -- Issue AXI read request
       -- For i=0 to NUM_SAMPLES-1: request actual data addresses
       -- For i=NUM_SAMPLES: re-read address 0 (just to flush pipeline, data discarded)
@@ -650,11 +648,12 @@ begin
       read_data := m_axi_rdata;
 
       -- Process data: i=0 is garbage (pipeline priming), i=1..NUM_SAMPLES is real data
-      if i > 0 then
+      -- Direct processing (no latency compensation needed)
+      if true then
         -- Data received is for sample (i-1)
-        sample_idx <= i - 1;
+        sample_idx <= i;
         iq_word <= read_data;
-        expected_word <= expected_data(i - 1);
+        expected_word <= expected_data(i);
         i_val := signed(read_data(15 downto 0));
         q_val := signed(read_data(31 downto 16));
         i_out <= i_val;
@@ -666,20 +665,20 @@ begin
         else
           v_bad_count := v_bad_count + 1;
           if v_bad_count <= 10 then
-            report "BAD Sample " & integer'image(i - 1) &
+            report "BAD Sample " & integer'image(i) &
                    ": I=" & integer'image(to_integer(i_val)) &
                    ", Q=" & integer'image(to_integer(q_val));
           end if;
         end if;
 
         -- Compare against expected COE data
-        if read_data /= expected_data(i - 1) then
+        if read_data /= expected_data(i) then
           v_mismatch_count := v_mismatch_count + 1;
           if v_mismatch_count <= 10 then
-            report "MISMATCH at address " & integer'image(i - 1) &
+            report "MISMATCH at address " & integer'image(i) &
                    ": Expected=0x" &
-                   integer'image(to_integer(unsigned(expected_data(i - 1)(31 downto 16)))) & "_" &
-                   integer'image(to_integer(unsigned(expected_data(i - 1)(15 downto 0)))) &
+                   integer'image(to_integer(unsigned(expected_data(i)(31 downto 16)))) & "_" &
+                   integer'image(to_integer(unsigned(expected_data(i)(15 downto 0)))) &
                    ", Got=0x" &
                    integer'image(to_integer(unsigned(read_data(31 downto 16)))) & "_" &
                    integer'image(to_integer(unsigned(read_data(15 downto 0))));

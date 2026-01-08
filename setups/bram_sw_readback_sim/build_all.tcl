@@ -286,8 +286,9 @@ set_property -dict [list \
     CONFIG.Enable_32bit_Address {true} \
     CONFIG.Enable_A {Always_Enabled} \
     CONFIG.EN_SAFETY_CKT {false} \
-    CONFIG.Register_PortA_Output_of_Memory_Core {true} \
-    CONFIG.Register_PortA_Output_of_Memory_Primitives {false} \
+    CONFIG.Register_PortA_Output_of_Memory_Core {false} \
+    CONFIG.Register_PortA_Output_of_Memory_Primitives {true} \
+    CONFIG.Use_RSTA_Pin {false} \
     CONFIG.Fill_Remaining_Memory_Locations {true} \
     CONFIG.Remaining_Memory_Locations {FF} \
 ] [get_bd_cells $qpsk_snapshot_bram]
