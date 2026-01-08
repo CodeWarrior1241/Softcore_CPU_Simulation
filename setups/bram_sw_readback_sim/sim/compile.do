@@ -62,6 +62,9 @@ puts "=========================================="
 vmap xil_defaultlib $vivado_questa_dir/questa_lib/msim/xil_defaultlib
 vmap neorv32 $vivado_questa_dir/questa_lib/msim/neorv32
 
+# Map UNISIM library from pre-compiled Xilinx libraries (needed for Top.vhd)
+vmap unisim $XILINX_QUESTA_LIBS/unisim
+
 # Compile UART components (need VHDL-2008 for math_real)
 set VCOM_TB_OPTS "-2008 -explicit -work xil_defaultlib"
 
