@@ -310,11 +310,11 @@ architecture sim of snapshot_bram_readback_tb is
   -- Configured for Standalone mode to allow COE file initialization.
   -- Uses 32-bit byte addresses (zero-extended from controller's 15-bit output).
   -- The BRAM internally handles byte-to-word address conversion.
+  -- BRAM is configured as Always_Enabled, so no ena port
   component Top_QPSK_Snapshot_BRAM_0
     port (
       clka  : in  std_logic;
       rsta  : in  std_logic;
-      ena   : in  std_logic;
       wea   : in  std_logic_vector(3 downto 0);   -- Byte-enable writes
       addra : in  std_logic_vector(31 downto 0);  -- 32-bit byte address
       dina  : in  std_logic_vector(31 downto 0);
@@ -479,7 +479,6 @@ begin
     port map (
       clka  => bram_clk_a,
       rsta  => bram_rst_a,
-      ena   => bram_en_a,
       wea   => bram_we_a,           -- Full 4-bit byte enables
       addra => bram_addr_a_ext,     -- Zero-extended 32-bit address
       dina  => bram_wrdata_a,
