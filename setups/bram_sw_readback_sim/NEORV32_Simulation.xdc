@@ -11,7 +11,8 @@ set_property IOSTANDARD DIFF_SSTL12 [get_ports ecs_clk_in_clk_p]
 set_property IOSTANDARD DIFF_SSTL12 [get_ports ecs_clk_in_clk_n]
 
 # Clock constraint for 300 MHz input clock
-create_clock -period 3.333 -name sys_clk [get_ports ecs_clk_in_clk_p]
+# Unnecessary as clocking wizard's internal XDC covers this
+# create_clock -period 3.333 -name sys_clk [get_ports ecs_clk_in_clk_p]
 
 # -----------------------------------------------------------------------------
 # System Reset (Active-Low Push Button PB3)
@@ -46,6 +47,6 @@ set_false_path -to [get_ports uart0_txd]
 set_property CONFIG_VOLTAGE 1.8 [current_design]
 set_property CFGBVS GND [current_design]
 set_property BITSTREAM.GENERAL.COMPRESS TRUE [current_design]
-set_property BITSTREAM.CONFIG.CONFIGRATE 33 [current_design]
+set_property BITSTREAM.CONFIG.CONFIGRATE 2.7 [current_design]
 set_property BITSTREAM.CONFIG.SPI_BUSWIDTH 4 [current_design]
 set_property BITSTREAM.CONFIG.SPI_32BIT_ADDR YES [current_design]
