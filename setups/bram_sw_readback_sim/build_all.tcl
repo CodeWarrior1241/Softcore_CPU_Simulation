@@ -321,6 +321,7 @@ save_bd_design
 set_property target_language VHDL [current_project]
 make_wrapper -files [get_files $project_dir/$project_name.srcs/$synth_sources_name/bd/$top_level_bd_name/$top_level_bd_name.bd] -top
 add_files -norecurse $project_dir/$project_name.gen/$synth_sources_name/bd/$top_level_bd_name/hdl/${top_level_bd_name}_wrapper.vhd
+add_files -fileset constrs_1 -norecurse $project_dir/NEORV32_Simulation.xdc
 save_bd_design
 
 # Generate output products for all IP used so that it can be used for simulation
