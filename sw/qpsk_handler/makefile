@@ -1,6 +1,9 @@
 # Application makefile for QPSK Handler.
 # Use this makefile to configure all relevant CPU / compiler options.
 
+# Override the VHDL application image filename
+APP_VHD = neorv32_qpsk_handler_image.vhd
+
 # Override the default CPU ISA
 MARCH = rv32i_zicsr_zifencei
 

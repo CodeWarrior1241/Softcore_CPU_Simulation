@@ -166,7 +166,7 @@ Both I and Q are 16-bit signed integers (two's complement format).
 ## Building
 
 ```bash
-cd sw/qpsk_handler
+cd sw/snapshot_handler
 make clean all
 ```
 
@@ -175,7 +175,7 @@ make clean all
 ### Step 1: Build and Install Application Image
 
 ```bash
-cd sw/qpsk_handler
+cd sw/snapshot_handler
 make install
 ```
 
@@ -231,7 +231,7 @@ This occurs because the makefile uses `set -e` (a Unix shell command) which Wind
 **Workaround:** After `make all` succeeds, manually run the image generator and copy the result:
 
 ```cmd
-cd sw\qpsk_handler
+cd sw\snapshot_handler
 
 REM Generate the VHDL image
 ..\..\sw\image_gen\image_gen.exe -t app_vhd -i build\main.bin -o neorv32_application_image.vhd
