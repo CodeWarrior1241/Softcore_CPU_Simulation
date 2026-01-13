@@ -1,0 +1,15 @@
+# Vivado project directories (generated, not source)
+NEORV32_Simulation.cache/
+NEORV32_Simulation.hw/
+NEORV32_Simulation.ip_user_files/
+NEORV32_Simulation.runs/
+NEORV32_Simulation.sim/
+NEORV32_Simulation.gen/
+NEORV32_Simulation.xpr
+*.jou
+*.log
+*.str
+*.wdb
+*.pb
+xsim.dir/
+.Xil/
