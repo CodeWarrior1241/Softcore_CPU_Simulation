@@ -1,5 +1,5 @@
 # ================================================================================
-# Vivado Block Design Testbench - Questa Prime Compilation Script
+# AD9361 Datapath Simulation - Questa Prime Compilation Script
 # ================================================================================
 # This script compiles the Vivado-generated IP sources plus our custom testbench
 # ================================================================================
@@ -7,7 +7,7 @@
 # Quit any existing simulation
 quit -sim
 
-# Save the current directory (setups/vivado/sim)
+# Save the current directory (setups/neorv32_sw_ad9361_datapath_sim/sim)
 set sim_dir [pwd]
 
 # Path to Vivado-generated Questa scripts (relative to sim directory)
@@ -124,23 +124,13 @@ puts "=========================================="
 vmap xil_defaultlib $vivado_questa_dir/questa_lib/msim/xil_defaultlib
 vmap neorv32 $vivado_questa_dir/questa_lib/msim/neorv32
 
-# Map UNISIM library from pre-compiled Xilinx libraries (needed for Top.vhd)
+# Map UNISIM library from pre-compiled Xilinx libraries
 vmap unisim $XILINX_QUESTA_LIBS/unisim
 
-# Compile UART components (need VHDL-2008 for math_real)
-set VCOM_TB_OPTS "-2008 -explicit -work xil_defaultlib"
-
-# Simulation UART receiver and transmitter from the main sim directory
-vcom {*}$VCOM_TB_OPTS $sim_dir/../../../sim/sim_uart_rx.vhd
-vcom {*}$VCOM_TB_OPTS $sim_dir/../../../sim/sim_uart_tx.vhd
-
-# Block design entity and wrapper (recompile to pick up any port changes like sim_clock_100MHz)
-# Top.vhd must be compiled before Top_wrapper.vhd since wrapper depends on entity
-vcom {*}$VCOM_TB_OPTS $sim_dir/../NEORV32_Simulation.gen/sources_1/bd/Top/sim/Top.vhd
-vcom {*}$VCOM_TB_OPTS $sim_dir/../NEORV32_Simulation.gen/sources_1/bd/Top/hdl/Top_wrapper.vhd
-
-# Our custom testbench
-vcom {*}$VCOM_TB_OPTS $sim_dir/vivado_tb.vhd
+# Compile our custom Verilog testbench
+# Use -incr for incremental compilation
+vlog -work xil_defaultlib -incr -sv \
+    $sim_dir/vivado_tb.v
 
 puts "=========================================="
 puts "Compilation Complete!"
