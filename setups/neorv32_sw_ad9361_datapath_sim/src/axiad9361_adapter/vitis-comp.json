@@ -1,0 +1,15 @@
+{
+  "name": "axiad9361_adapter",
+  "type": "HLS",
+  "configuration": {
+    "componentType": "HLS",
+    "configFiles": [
+      "axi_ad9361_adapter.cfg"
+    ],
+    "work_dir": "axiad9361_adapter",
+    "csim_args": ""
+  },
+  "useSysrootToolchain": false,
+  "template": "empty_hls_component",
+  "templateFlow": "VITIS"
+}

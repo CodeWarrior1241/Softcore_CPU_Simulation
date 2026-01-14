@@ -182,11 +182,71 @@ source $neorv32_home/rtl/system_integration/neorv32_vivado_ip.tcl
 # The neorv32_vivado_ip.tcl script creates/closes its own project for packaging.
 # Our project should still be current, but the block design may need reopening.
 
-# Add NEORV32 IP and ADI IP to our project's repository paths
-puts "INFO: Adding NEORV32 IP and ADI IP to repository..."
+###############################################################################
+# Build AXI AD9361 Adapter HLS IP
+###############################################################################
+
+puts "INFO: Building AXI AD9361 Adapter HLS IP..."
+set hls_src_dir "$project_dir/src/axiad9361_adapter"
+set hls_ip_dir "$project_dir/hls_ip"
+set hls_config_file "$hls_src_dir/axi_ad9361_adapter.cfg"
+set hls_work_dir "$hls_src_dir/work"
+
+# Check if HLS IP already exists (skip rebuild if so)
+set hls_ip_exists 0
+if {[file exists $hls_ip_dir]} {
+    set zip_files [glob -nocomplain -directory $hls_ip_dir *.zip]
+    if {[llength $zip_files] > 0} {
+        set hls_ip_exists 1
+        puts "INFO: HLS IP already exists at $hls_ip_dir, skipping build..."
+    }
+}
+
+if {!$hls_ip_exists} {
+    # Verify HLS source files exist
+    if {![file exists $hls_config_file]} {
+        puts "ERROR: HLS config file not found: $hls_config_file"
+        return -1
+    }
+
+    # Run Vitis HLS C Synthesis
+    puts "INFO: Running Vitis HLS C Synthesis..."
+    if {[catch {exec v++ --compile --mode hls --config $hls_config_file --work_dir $hls_work_dir} result]} {
+        puts "ERROR: HLS C Synthesis failed:"
+        puts $result
+        return -1
+    }
+    puts "INFO: HLS C Synthesis complete."
+
+    # Run Vitis HLS IP Packaging
+    puts "INFO: Running Vitis HLS IP Packaging..."
+    if {[catch {exec v++ --package --mode hls --config $hls_config_file --work_dir $hls_work_dir} result]} {
+        puts "ERROR: HLS IP Packaging failed:"
+        puts $result
+        return -1
+    }
+    puts "INFO: HLS IP Packaging complete."
+
+    # Copy generated IP to output directory
+    file mkdir $hls_ip_dir
+    foreach zip_file [glob -nocomplain -directory $hls_work_dir *.zip] {
+        puts "INFO: Copying [file tail $zip_file] to $hls_ip_dir"
+        file copy -force $zip_file $hls_ip_dir/
+    }
+
+    # Also check in impl subdirectory (common HLS output location)
+    foreach zip_file [glob -nocomplain -directory "$hls_work_dir" -type f "*.zip"] {
+        puts "INFO: Copying [file tail $zip_file] to $hls_ip_dir"
+        file copy -force $zip_file $hls_ip_dir/
+    }
+}
+
+# Add NEORV32 IP, ADI IP, and HLS IP to our project's repository paths
+puts "INFO: Adding NEORV32 IP, ADI IP, and HLS IP to repository..."
 set current_ip_paths [get_property ip_repo_paths [current_project]]
 lappend current_ip_paths "$neorv32_ip_output_dir/packaged_ip"
 lappend current_ip_paths $adi_ip_dir
+lappend current_ip_paths $hls_ip_dir
 set_property ip_repo_paths $current_ip_paths [current_project]
 update_ip_catalog -rebuild
 
