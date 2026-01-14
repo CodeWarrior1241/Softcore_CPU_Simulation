@@ -446,6 +446,24 @@ connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins $uti
 connect_bd_net [get_bd_pins $util_ad9361_divclk/clk_out] [get_bd_pins $util_ad9361_divclk_reset/slowest_sync_clk]
 
 ###############################################################################
+# ADC/DAC util components
+###############################################################################
+
+# ADC Channel Packer (util_cpack2)
+create_bd_cell -type ip -vlnv analog.com:user:util_cpack2:1.0 $util_ad9361_adc_pack
+set_property -dict [list \
+    CONFIG.NUM_OF_CHANNELS {4} \
+    CONFIG.SAMPLE_DATA_WIDTH {16} \
+] [get_bd_cells $util_ad9361_adc_pack]
+
+# DAC Channel Unpacker (util_upack2)
+create_bd_cell -type ip -vlnv analog.com:user:util_upack2:1.0 $util_ad9361_dac_upack
+set_property -dict [list \
+    CONFIG.NUM_OF_CHANNELS {4} \
+    CONFIG.SAMPLE_DATA_WIDTH {16} \
+] [get_bd_cells $util_ad9361_dac_upack]
+
+###############################################################################
 # ADC Path: util_wfifo -> util_cpack2
 ###############################################################################
 
@@ -483,13 +501,6 @@ connect_bd_net [get_bd_pins $axi_ad9361/adc_data_q1] [get_bd_pins $util_ad9361_a
 # Connect overflow signal
 connect_bd_net [get_bd_pins $util_ad9361_adc_fifo/din_ovf] [get_bd_pins $axi_ad9361/adc_dovf]
 
-# ADC Channel Packer (util_cpack2)
-create_bd_cell -type ip -vlnv analog.com:user:util_cpack2:1.0 $util_ad9361_adc_pack
-set_property -dict [list \
-    CONFIG.NUM_OF_CHANNELS {4} \
-    CONFIG.SAMPLE_DATA_WIDTH {16} \
-] [get_bd_cells $util_ad9361_adc_pack]
-
 # Connect ADC pack clocks and resets
 connect_bd_net [get_bd_pins $util_ad9361_divclk/clk_out] [get_bd_pins $util_ad9361_adc_pack/clk]
 connect_bd_net [get_bd_pins $util_ad9361_divclk_reset/peripheral_reset] [get_bd_pins $util_ad9361_adc_pack/reset]
@@ -508,8 +519,10 @@ connect_bd_net [get_bd_pins $util_ad9361_adc_fifo/dout_data_2] [get_bd_pins $uti
 connect_bd_net [get_bd_pins $util_ad9361_adc_fifo/dout_enable_3] [get_bd_pins $util_ad9361_adc_pack/enable_3]
 connect_bd_net [get_bd_pins $util_ad9361_adc_fifo/dout_data_3] [get_bd_pins $util_ad9361_adc_pack/fifo_wr_data_3]
 
-# NOTE: util_ad9361_adc_pack/packed_fifo_wr output left unconnected
-# This will be connected to your BRAM write logic later
+# Connect ADC pack output to DAC upack input (internal loopback)
+# This creates a direct path: ADC -> FIFO -> pack -> upack -> FIFO -> DAC
+connect_bd_net [get_bd_pins $util_ad9361_adc_pack/packed_fifo_wr_en] [get_bd_pins $util_ad9361_dac_upack/s_axis_valid]
+connect_bd_net [get_bd_pins $util_ad9361_adc_pack/packed_fifo_wr_data] [get_bd_pins $util_ad9361_dac_upack/s_axis_data]
 
 ###############################################################################
 # DAC Path: util_upack2 -> util_rfifo
@@ -548,13 +561,6 @@ connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_data_3] [get_bd_pins $axi_
 # Connect underflow signal
 connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_unf] [get_bd_pins $axi_ad9361/dac_dunf]
 
-# DAC Channel Unpacker (util_upack2)
-create_bd_cell -type ip -vlnv analog.com:user:util_upack2:1.0 $util_ad9361_dac_upack
-set_property -dict [list \
-    CONFIG.NUM_OF_CHANNELS {4} \
-    CONFIG.SAMPLE_DATA_WIDTH {16} \
-] [get_bd_cells $util_ad9361_dac_upack]
-
 # Connect DAC upack clocks and resets
 connect_bd_net [get_bd_pins $util_ad9361_divclk/clk_out] [get_bd_pins $util_ad9361_dac_upack/clk]
 connect_bd_net [get_bd_pins $util_ad9361_divclk_reset/peripheral_reset] [get_bd_pins $util_ad9361_dac_upack/reset]
@@ -577,8 +583,7 @@ connect_bd_net [get_bd_pins $util_ad9361_dac_upack/enable_3] [get_bd_pins $axi_a
 connect_bd_net [get_bd_pins $util_ad9361_dac_upack/fifo_rd_valid] [get_bd_pins $axi_ad9361_dac_fifo/din_valid_in_3]
 connect_bd_net [get_bd_pins $util_ad9361_dac_upack/fifo_rd_data_3] [get_bd_pins $axi_ad9361_dac_fifo/din_data_3]
 
-# NOTE: util_ad9361_dac_upack/s_axis input left unconnected
-# This will be connected to your BRAM read logic later
+# NOTE: util_ad9361_dac_upack/s_axis is connected to util_ad9361_adc_pack output above
 
 ###############################################################################
 # AXI and Reset Connections

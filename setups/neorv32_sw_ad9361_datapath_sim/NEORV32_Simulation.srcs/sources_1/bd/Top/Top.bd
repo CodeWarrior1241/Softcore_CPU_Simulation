@@ -25,10 +25,10 @@
       "util_ad9361_divclk_sel": "",
       "util_ad9361_divclk": "",
       "util_ad9361_divclk_reset": "",
-      "util_ad9361_adc_fifo": "",
       "util_ad9361_adc_pack": "",
-      "axi_ad9361_dac_fifo": "",
-      "util_ad9361_dac_upack": ""
+      "util_ad9361_dac_upack": "",
+      "util_ad9361_adc_fifo": "",
+      "axi_ad9361_dac_fifo": ""
     },
     "interface_ports": {
       "ecs_clk_in": {
@@ -695,6 +695,38 @@
         "inst_hier_path": "util_ad9361_divclk_reset",
         "has_run_ip_tcl": "true"
       },
+      "util_ad9361_adc_pack": {
+        "vlnv": "analog.com:user:util_cpack2:1.0",
+        "ip_revision": "1",
+        "xci_name": "Top_util_ad9361_adc_pack_0",
+        "xci_path": "ip\\Top_util_ad9361_adc_pack_0\\Top_util_ad9361_adc_pack_0.xci",
+        "inst_hier_path": "util_ad9361_adc_pack",
+        "has_run_ip_tcl": "true",
+        "parameters": {
+          "NUM_OF_CHANNELS": {
+            "value": "4"
+          },
+          "SAMPLE_DATA_WIDTH": {
+            "value": "16"
+          }
+        }
+      },
+      "util_ad9361_dac_upack": {
+        "vlnv": "analog.com:user:util_upack2:1.0",
+        "ip_revision": "1",
+        "xci_name": "Top_util_ad9361_dac_upack_0",
+        "xci_path": "ip\\Top_util_ad9361_dac_upack_0\\Top_util_ad9361_dac_upack_0.xci",
+        "inst_hier_path": "util_ad9361_dac_upack",
+        "has_run_ip_tcl": "true",
+        "parameters": {
+          "NUM_OF_CHANNELS": {
+            "value": "4"
+          },
+          "SAMPLE_DATA_WIDTH": {
+            "value": "16"
+          }
+        }
+      },
       "util_ad9361_adc_fifo": {
         "vlnv": "analog.com:user:util_wfifo:1.0",
         "ip_revision": "1",
@@ -717,22 +749,6 @@
           }
         }
       },
-      "util_ad9361_adc_pack": {
-        "vlnv": "analog.com:user:util_cpack2:1.0",
-        "ip_revision": "1",
-        "xci_name": "Top_util_ad9361_adc_pack_0",
-        "xci_path": "ip\\Top_util_ad9361_adc_pack_0\\Top_util_ad9361_adc_pack_0.xci",
-        "inst_hier_path": "util_ad9361_adc_pack",
-        "has_run_ip_tcl": "true",
-        "parameters": {
-          "NUM_OF_CHANNELS": {
-            "value": "4"
-          },
-          "SAMPLE_DATA_WIDTH": {
-            "value": "16"
-          }
-        }
-      },
       "axi_ad9361_dac_fifo": {
         "vlnv": "analog.com:user:util_rfifo:1.0",
         "ip_revision": "1",
@@ -748,22 +764,6 @@
             "value": "16"
           },
           "DOUT_DATA_WIDTH": {
-            "value": "16"
-          }
-        }
-      },
-      "util_ad9361_dac_upack": {
-        "vlnv": "analog.com:user:util_upack2:1.0",
-        "ip_revision": "1",
-        "xci_name": "Top_util_ad9361_dac_upack_0",
-        "xci_path": "ip\\Top_util_ad9361_dac_upack_0\\Top_util_ad9361_dac_upack_0.xci",
-        "inst_hier_path": "util_ad9361_dac_upack",
-        "has_run_ip_tcl": "true",
-        "parameters": {
-          "NUM_OF_CHANNELS": {
-            "value": "4"
-          },
-          "SAMPLE_DATA_WIDTH": {
             "value": "16"
           }
         }
@@ -1240,6 +1240,18 @@
         "ports": [
           "util_ad9361_adc_pack/fifo_wr_overflow",
           "util_ad9361_adc_fifo/dout_ovf"
+        ]
+      },
+      "util_ad9361_adc_pack_packed_fifo_wr_data": {
+        "ports": [
+          "util_ad9361_adc_pack/packed_fifo_wr_data",
+          "util_ad9361_dac_upack/s_axis_data"
+        ]
+      },
+      "util_ad9361_adc_pack_packed_fifo_wr_en": {
+        "ports": [
+          "util_ad9361_adc_pack/packed_fifo_wr_en",
+          "util_ad9361_dac_upack/s_axis_valid"
         ]
       },
       "util_ad9361_dac_upack_fifo_rd_data_0": {

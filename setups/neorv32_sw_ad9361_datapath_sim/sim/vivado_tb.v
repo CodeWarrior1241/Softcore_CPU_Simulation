@@ -4,12 +4,54 @@
 //
 // This testbench instantiates the Top_wrapper block design and provides:
 //   - Clock generation (300MHz differential input for PLL)
-//   - Reset sequencing
-//   - AD9361 LVDS stimulus (RX path) and monitoring (TX path)
+//   - Reset sequencing (10ms reset period for CPU initialization)
+//   - AD9361 LVDS stimulus from COE file data (looped continuously)
+//   - TX to RX loopback for datapath verification
 //   - UART monitoring
 //
-// The testbench generates a simple LVDS clock and data pattern to exercise
-// the AD9361 receive path. The transmit path outputs can be monitored.
+//------------------------------------------------------------------------------
+// Architecture Block Diagram
+//------------------------------------------------------------------------------
+//
+//  +------------------------------------------------------------------------+
+//  |           DUT (Top_wrapper / FPGA Design)                              |
+//  |                                                                        |
+//  |  LVDS RX        +-------------+         +-------------+    LVDS TX     |
+//  |  ------+------->| axi_ad9361  |         | axi_ad9361  |-----+------>   |
+//  |  clk   |        | ADC Section |         | DAC Section |     |          |
+//  |  frame |        +------+------+         +------+------+     | clk      |
+//  |  data  |               |                       ^            | frame    |
+//  |                        v                       |            | data     |
+//  |                 +-------------+         +-------------+                |
+//  |                 | util_wfifo  |         | util_rfifo  |                |
+//  |                 | (ADC FIFO)  |         | (DAC FIFO)  |                |
+//  |                 +------+------+         +------+------+                |
+//  |                        |                       ^                       |
+//  |                        v                       |                       |
+//  |                 +-------------+         +-------------+                |
+//  |                 | util_cpack2 |-------->| util_upack2 |                |
+//  |                 | (pack 4ch)  | 64-bit  | (unpack 4ch)|                |
+//  |                 +-------------+ data    +-------------+                |
+//  |                                                                        |
+//  |  +-------------+                                                       |
+//  |  | NEORV32 CPU |---> UART TX (status monitoring)                       |
+//  |  | (control)   |---> GPIO (up_enable, up_txnrx)                        |
+//  |  +-------------+                                                       |
+//  |                                                                        |
+//  +------------------------------------------------------------------------+
+//
+//------------------------------------------------------------------------------
+// Test Sequence
+//------------------------------------------------------------------------------
+//
+//  1. Reset held for 10ms (CPU initialization)
+//  2. PLL locks, clocks stable
+//  3. CPU enables AD9361 via GPIO (up_enable=1, up_txnrx=1)
+//  4. Testbench feeds COE data into LVDS RX (looped)
+//  5. Data flows: RX -> ADC FIFO -> cpack2 -> upack2 -> DAC FIFO -> TX
+//  6. After 2 full COE loops, testbench switches to TX->RX loopback mode
+//  7. Data now circulates: TX -> loopback -> RX -> ... -> TX
+//  8. Simulation runs for 50ms total
 //
 //------------------------------------------------------------------------------
 
@@ -23,11 +65,13 @@ module vivado_tb;
 
     // Clock periods
     parameter real ECS_CLK_PERIOD_NS = 3.333;    // 300 MHz input clock
-    parameter real AD9361_CLK_PERIOD_NS = 8.0;   // 125 MHz AD9361 data clock (example)
+    parameter real AD9361_CLK_PERIOD_NS = 8.0;   // 125 MHz AD9361 data clock
 
     // Simulation timing
-    parameter RESET_HOLD_NS = 100;
-    parameter RESET_RELEASE_NS = 500;
+    parameter RESET_HOLD_NS = 10_000_000;        // 10ms reset hold for CPU init
+
+    // COE data parameters
+    parameter NUM_COE_SAMPLES = 1024;            // Number of IQ samples in COE file
 
     //--------------------------------------------------------------------------
     // Testbench Signals
@@ -44,13 +88,13 @@ module vivado_tb;
     wire uart0_txd;
     reg  uart0_rxd;
 
-    // AD9361 LVDS RX interface (from testbench to DUT)
-    reg        rx_clk_in_p;
-    reg        rx_clk_in_n;
-    reg        rx_frame_in_p;
-    reg        rx_frame_in_n;
-    reg  [5:0] rx_data_in_p;
-    reg  [5:0] rx_data_in_n;
+    // AD9361 LVDS RX interface (directly connect to TX loopback after initial stimulus)
+    wire       rx_clk_in_p;
+    wire       rx_clk_in_n;
+    wire       rx_frame_in_p;
+    wire       rx_frame_in_n;
+    wire [5:0] rx_data_in_p;
+    wire [5:0] rx_data_in_n;
 
     // AD9361 LVDS TX interface (from DUT to testbench)
     wire        tx_clk_out_p;
@@ -70,6 +114,43 @@ module vivado_tb;
     // Clock locked indicator (directly from PLL via external port)
     wire sim_clock_100MHz_locked;
     wire sim_clock_100MHz;
+
+    //--------------------------------------------------------------------------
+    // COE Data Storage and Stimulus Generation
+    //--------------------------------------------------------------------------
+
+    // Memory to hold COE data (32-bit words: {Q[31:16], I[15:0]})
+    reg [31:0] coe_data [0:NUM_COE_SAMPLES-1];
+
+    // Stimulus generation signals
+    reg        stim_clk;
+    reg        stim_frame_p;
+    reg        stim_frame_n;
+    reg  [5:0] stim_data_p;
+    reg  [5:0] stim_data_n;
+
+    // COE playback control
+    reg [9:0]  coe_index;
+    reg [15:0] current_i;
+    reg [15:0] current_q;
+    reg        phase;           // 0 = I sample, 1 = Q sample
+    reg        half_cycle;      // 0 = first 6 bits, 1 = last 6 bits
+
+    // Loopback enable (after initial COE data has been sent)
+    reg        loopback_mode;
+    integer    samples_sent;
+
+    //--------------------------------------------------------------------------
+    // RX MUX: Select between stimulus and loopback
+    //--------------------------------------------------------------------------
+
+    // Use stimulus clock initially, then switch to TX loopback
+    assign rx_clk_in_p   = loopback_mode ? tx_clk_out_p   : stim_clk;
+    assign rx_clk_in_n   = loopback_mode ? tx_clk_out_n   : ~stim_clk;
+    assign rx_frame_in_p = loopback_mode ? tx_frame_out_p : stim_frame_p;
+    assign rx_frame_in_n = loopback_mode ? tx_frame_out_n : stim_frame_n;
+    assign rx_data_in_p  = loopback_mode ? tx_data_out_p  : stim_data_p;
+    assign rx_data_in_n  = loopback_mode ? tx_data_out_n  : stim_data_n;
 
     //--------------------------------------------------------------------------
     // DUT Instantiation
@@ -135,23 +216,19 @@ module vivado_tb;
     end
 
     always begin
-        #(ECS_CLK_PERIOD_NS / 2.0);  // Same as ECS clock (300MHz)
+        #(ECS_CLK_PERIOD_NS / 2.0);
         delay_clk = ~delay_clk;
     end
 
     //--------------------------------------------------------------------------
-    // Clock Generation: AD9361 LVDS RX Clock
+    // Load COE Data at Startup
     //--------------------------------------------------------------------------
 
     initial begin
-        rx_clk_in_p = 1'b0;
-        rx_clk_in_n = 1'b1;
-    end
-
-    always begin
-        #(AD9361_CLK_PERIOD_NS / 2.0);
-        rx_clk_in_p = ~rx_clk_in_p;
-        rx_clk_in_n = ~rx_clk_in_n;
+        // Load COE file data
+        // Note: $readmemh expects hex values without the header
+        $readmemh("qpsk_bram_data.hex", coe_data);
+        $display("[%0t] Loaded %0d samples from COE data", $time, NUM_COE_SAMPLES);
     end
 
     //--------------------------------------------------------------------------
@@ -162,14 +239,11 @@ module vivado_tb;
         // Start with reset asserted
         system_resetn = 1'b0;
 
-        // Hold reset for specified time
+        // Hold reset for 10ms to allow CPU initialization
         #RESET_HOLD_NS;
-
-        // Release reset
-        #(RESET_RELEASE_NS - RESET_HOLD_NS);
         system_resetn = 1'b1;
 
-        $display("[%0t] Reset released", $time);
+        $display("[%0t] Reset released after 10ms", $time);
     end
 
     //--------------------------------------------------------------------------
@@ -181,44 +255,95 @@ module vivado_tb;
     end
 
     //--------------------------------------------------------------------------
-    // AD9361 RX Data Generation
+    // AD9361 RX Data Generation from COE File
     //--------------------------------------------------------------------------
     //
-    // In DDR LVDS mode, the AD9361 sends:
+    // In DDR LVDS 1R1T mode, the AD9361 sends:
     //   - 6 data bits per clock edge (12 bits per clock cycle)
-    //   - Frame signal indicates I/Q boundaries
+    //   - Frame signal: high during I sample, low during Q sample
+    //   - Data order: I sample (12 bits), then Q sample (12 bits)
     //
-    // For simplicity, this testbench generates a simple incrementing pattern.
-    // The actual data format depends on AD9361 configuration (1R1T vs 2R2T mode).
+    // Each 32-bit COE word contains: {Q[31:16], I[15:0]}
+    // We extract the upper 12 bits of each 16-bit sample (12-bit precision)
     //
     //--------------------------------------------------------------------------
-
-    reg [11:0] rx_sample_counter;
-    reg        rx_frame_state;
 
     initial begin
-        rx_data_in_p  = 6'h00;
-        rx_data_in_n  = 6'h3F;
-        rx_frame_in_p = 1'b0;
-        rx_frame_in_n = 1'b1;
-        rx_sample_counter = 12'h000;
-        rx_frame_state = 1'b0;
+        stim_clk = 1'b0;
+        stim_frame_p = 1'b0;
+        stim_frame_n = 1'b1;
+        stim_data_p = 6'h00;
+        stim_data_n = 6'h3F;
+        coe_index = 0;
+        current_i = 16'h0000;
+        current_q = 16'h0000;
+        phase = 1'b0;
+        half_cycle = 1'b0;
+        loopback_mode = 1'b0;
+        samples_sent = 0;
     end
 
-    // Generate RX data on both edges of rx_clk_in_p
-    always @(posedge rx_clk_in_p or negedge rx_clk_in_p) begin
-        if (system_resetn) begin
-            // Simple incrementing pattern
-            rx_sample_counter <= rx_sample_counter + 1;
+    // Generate stimulus clock and data from COE file
+    always begin
+        // Wait for reset release and PLL lock
+        wait(system_resetn && sim_clock_100MHz_locked);
 
-            // Toggle frame every clock cycle (simplified)
-            rx_frame_state <= ~rx_frame_state;
-            rx_frame_in_p <= rx_frame_state;
-            rx_frame_in_n <= ~rx_frame_state;
+        // Small delay after reset
+        #1000;
 
-            // Output lower 6 bits of counter as data
-            rx_data_in_p <= rx_sample_counter[5:0];
-            rx_data_in_n <= ~rx_sample_counter[5:0];
+        $display("[%0t] Starting COE data stimulus", $time);
+
+        // Loop through COE data continuously
+        forever begin
+            // Load next sample from COE data
+            current_i = coe_data[coe_index][15:0];
+            current_q = coe_data[coe_index][31:16];
+
+            // Send I sample (frame high)
+            // First half: upper 6 bits of I on rising edge
+            stim_frame_p = 1'b1;
+            stim_frame_n = 1'b0;
+            stim_data_p = current_i[15:10];  // Upper 6 bits
+            stim_data_n = ~current_i[15:10];
+            #(AD9361_CLK_PERIOD_NS / 2.0);
+            stim_clk = 1'b1;
+
+            // Second half: lower 6 bits of I on falling edge
+            stim_data_p = current_i[9:4];    // Middle 6 bits (skip lower 4)
+            stim_data_n = ~current_i[9:4];
+            #(AD9361_CLK_PERIOD_NS / 2.0);
+            stim_clk = 1'b0;
+
+            // Send Q sample (frame low)
+            // First half: upper 6 bits of Q on rising edge
+            stim_frame_p = 1'b0;
+            stim_frame_n = 1'b1;
+            stim_data_p = current_q[15:10];  // Upper 6 bits
+            stim_data_n = ~current_q[15:10];
+            #(AD9361_CLK_PERIOD_NS / 2.0);
+            stim_clk = 1'b1;
+
+            // Second half: lower 6 bits of Q on falling edge
+            stim_data_p = current_q[9:4];    // Middle 6 bits
+            stim_data_n = ~current_q[9:4];
+            #(AD9361_CLK_PERIOD_NS / 2.0);
+            stim_clk = 1'b0;
+
+            // Move to next sample
+            samples_sent = samples_sent + 1;
+            coe_index = coe_index + 1;
+            if (coe_index >= NUM_COE_SAMPLES) begin
+                coe_index = 0;  // Loop back to start
+                $display("[%0t] COE data loop completed (%0d samples sent), restarting", $time, samples_sent);
+            end
+
+            // After sending initial data, enable loopback mode
+            // This allows TX->RX loopback to take over
+            if (samples_sent == NUM_COE_SAMPLES * 2) begin
+                $display("[%0t] Switching to TX->RX loopback mode", $time);
+                loopback_mode = 1'b1;
+                // In loopback mode, this process continues but RX mux uses TX signals
+            end
         end
     end
 
@@ -228,7 +353,7 @@ module vivado_tb;
 
     always @(posedge tx_clk_out_p) begin
         if (system_resetn && sim_clock_100MHz_locked) begin
-            // Monitor TX data (optional - for debug)
+            // Monitor TX data (uncomment for debug)
             // $display("[%0t] TX Data: %h, Frame: %b", $time, tx_data_out_p, tx_frame_out_p);
         end
     end
@@ -289,19 +414,22 @@ module vivado_tb;
 
     initial begin
         $display("==============================================");
-        $display("  NEORV32 + AD9361 Datapath Simulation");
+        $display("  NEORV32 + AD9361 Datapath Loopback Test");
         $display("==============================================");
         $display("  ECS Clock Period:    %0.3f ns (%.0f MHz)", ECS_CLK_PERIOD_NS, 1000.0/ECS_CLK_PERIOD_NS);
         $display("  AD9361 Clock Period: %0.3f ns (%.0f MHz)", AD9361_CLK_PERIOD_NS, 1000.0/AD9361_CLK_PERIOD_NS);
+        $display("  COE Samples:         %0d", NUM_COE_SAMPLES);
+        $display("  Reset Period:        10ms");
         $display("==============================================");
 
         // Wait for simulation to complete or timeout
-        // Adjust timeout based on your test requirements
-        #10000000;  // 10ms default timeout
+        // 50ms should be enough for multiple loops of 1024 samples
+        #50_000_000;  // 50ms timeout
 
         $display("");
         $display("==============================================");
-        $display("  Simulation timeout reached");
+        $display("  Simulation timeout reached (50ms)");
+        $display("  Total samples sent: %0d", samples_sent);
         $display("==============================================");
         $finish;
     end
