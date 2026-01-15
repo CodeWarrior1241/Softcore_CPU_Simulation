@@ -61,25 +61,30 @@ sim/NVC/work/
 sim/GHDL/work/
 *.cf
 
-# Vivado project artifacts
-setups/vivado/NEORV32_Simulation.cache/
-setups/vivado/NEORV32_Simulation.hw/
-setups/vivado/NEORV32_Simulation.ip_user_files/
-setups/vivado/NEORV32_Simulation.gen/
-setups/vivado/NEORV32_Simulation.runs/
-setups/vivado/NEORV32_Simulation.sim/
-setups/vivado/NEORV32_Simulation.srcs/
-setups/vivado/NEORV32_Simulation.xpr
-setups/vivado/.Xil/
+# Vivado project artifacts (all setups)
+*.cache/
+*.hw/
+*.ip_user_files/
+*.gen/
+*.runs/
+*.sim/
+*.srcs/
+*.xpr
+*.xdc
+.Xil/
 *.jou
 *.str
 
-# Vivado simulation artifacts
-setups/vivado/sim/libraries
-setups/vivado/sim/modelsim.ini
-setups/vivado/sim/transcript
-setups/vivado/sim/*.wlf
-setups/vivado/sim/*.log
+# Vivado simulation artifacts (all setups)
+setups/*/sim/libraries/
+setups/*/sim/modelsim.ini
+setups/*/sim/transcript
+setups/*/sim/*.wlf
+setups/*/sim/*.log
 
-# Keep the QPSK COE file (exception to *.coe rule)
-!setups/vivado/sim/qpsk_bram_init.coe
+# Keep COE files in sim directories (exception to *.coe rule)
+!setups/*/sim/*.coe
+
+# Vivado runtime files
+dfx_runtime.txt
+adi_ip/
