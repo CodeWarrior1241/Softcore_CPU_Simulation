@@ -9,24 +9,94 @@ This directory contains simulation scripts for running the NEORV32 RISC-V proces
 ## Prerequisites
 
 - **NVC 1.8+** - Open-source VHDL simulator with VHDL-2008 support
+- **RISC-V GCC toolchain** (GCC 12+ required for `zicsr_zifencei` extensions)
+- **Python 3** with matplotlib and numpy (for constellation plots)
 - **GTKWave** (optional) - Waveform viewer for FST files
 
-### Installation
+### Installing NVC
 
 **Windows (winget):**
 ```
 winget install nickg.nvc
 ```
 
-**Linux (Ubuntu/Debian):**
-```
-sudo apt install nvc
+**Linux (build from source):**
+```bash
+sudo apt install build-essential automake autoconf flex bison \
+    libdw-dev libffi-dev pkg-config zlib1g-dev llvm-dev clang libzstd-dev
+cd /tmp
+git clone https://github.com/nickg/nvc.git
+cd nvc
+./autogen.sh
+mkdir build && cd build
+../configure
+make -j$(nproc)
+sudo make install
 ```
 
 **macOS (Homebrew):**
 ```
 brew install nvc
 ```
+
+### Installing the RISC-V Toolchain
+
+**Linux (xPack toolchain - recommended):**
+```bash
+cd /tmp
+wget https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v14.2.0-3/xpack-riscv-none-elf-gcc-14.2.0-3-linux-x64.tar.gz
+sudo mkdir -p /opt/xpack-riscv
+sudo tar -xzf xpack-riscv-none-elf-gcc-14.2.0-3-linux-x64.tar.gz -C /opt/xpack-riscv --strip-components=1
+export PATH="/opt/xpack-riscv/bin:$PATH"
+```
+
+Add the export line to your `~/.bashrc` to make it permanent.
+
+**Windows:**
+
+Download from [xPack RISC-V GCC releases](https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases) and add the `bin` directory to your PATH.
+
+**Alternative (may be too old on some distros):**
+```bash
+sudo apt install gcc-riscv64-unknown-elf
+export RISCV_PREFIX=riscv64-unknown-elf-
+```
+
+### Installing Python Dependencies
+
+```bash
+# Ubuntu/Debian (system packages)
+sudo apt install python3-matplotlib python3-numpy
+
+# Or via pip
+pip3 install matplotlib numpy
+```
+
+## Default Application
+
+The testbench is configured to run the **snapshot_handler** application, which implements a UART command interface for capturing IQ samples from the FPGA. The testbench automatically sends test commands and captures the responses.
+
+### Building the Snapshot Handler
+
+Before running the simulation, build and install the snapshot_handler application:
+
+**Linux/macOS:**
+```bash
+cd sw/snapshot_handler
+make clean_all exe
+make install
+```
+
+**Windows:**
+```batch
+cd sw\snapshot_handler
+make clean_all exe
+make install
+```
+
+This compiles the application and installs `neorv32_application_image.vhd` to `rtl/core/`.
+
+See `sw/snapshot_handler/README.md` for detailed documentation on the application.
 
 ## Changing the Application Program
 
@@ -36,38 +106,35 @@ The simulation runs whatever program is compiled into `rtl/core/neorv32_applicat
 
 Navigate to the program directory and build it:
 
-```batch
-cd sw\example\hello_world
+```bash
+cd sw/example/hello_world
 make clean_all exe
+make install
 ```
 
-This generates `neorv32_application_image.vhd` in `rtl/core/`.
+This generates and installs `neorv32_application_image.vhd` to `rtl/core/`.
 
 ### Step 2: Clean and Re-run Simulation
 
 The simulator must re-analyze the updated VHDL file:
 
-```batch
-cd sim\NVC
-run_sim.bat --clean
-run_sim.bat --time 500ms
+```bash
+cd sim/NVC
+./run_sim.sh --clean
+./run_sim.sh --time 500ms
 ```
 
 ### Available Example Programs
 
 | Program | Description |
 |---------|-------------|
+| `snapshot_handler` | **Default** - QPSK IQ sample capture via UART |
 | `hello_world` | Prints "Hello World!" via UART |
 | `demo_blink_led` | Blinks LEDs (not ideal for simulation - uses long delays) |
 | `demo_crc` | CRC computation demo |
 | `demo_trng` | True random number generator demo |
 
 See `sw/example/` for more programs.
-
-### Build Requirements
-
-- RISC-V GCC toolchain (`riscv-none-elf-gcc` or `riscv32-unknown-elf-gcc`)
-- `image_gen` utility (build with `sw/image_gen/build_msvc.bat` on Windows)
 
 ## Usage
 
