@@ -52,7 +52,6 @@ entity neorv32_tb is
     CPU_CONSTT_BR_EN  : boolean                        := false;       -- constant-time branches
     CPU_FAST_MUL_EN   : boolean                        := true;        -- use DSPs for M extension's multiplier
     CPU_FAST_SHIFT_EN : boolean                        := true;        -- use barrel shifter for shift operations
-    CPU_RF_HW_RST_EN  : boolean                        := false;       -- implement full hardware reset for register file
     IMEM_EN           : boolean                        := true;        -- implement processor-internal instruction memory
     IMEM_SIZE         : natural                        := 32*1024;     -- size of processor-internal instruction memory in bytes (use a power of 2)
     DMEM_EN           : boolean                        := true;        -- implement processor-internal data memory
@@ -177,7 +176,6 @@ begin
     CPU_CONSTT_BR_EN    => CPU_CONSTT_BR_EN,
     CPU_FAST_MUL_EN     => CPU_FAST_MUL_EN,
     CPU_FAST_SHIFT_EN   => CPU_FAST_SHIFT_EN,
-    CPU_RF_HW_RST_EN    => CPU_RF_HW_RST_EN,
     -- Physical Memory Protection (PMP) --
     PMP_NUM_REGIONS     => 5,
     PMP_MIN_GRANULARITY => 4,
@@ -325,9 +323,9 @@ begin
     -- Machine timer system time --
     mtime_time_o   => open,
     -- CPU Interrupts --
-    mtime_irq_i    => mti,
-    msw_irq_i      => msi,
-    mext_irq_i     => mei
+    irq_msi_i      => msi,
+    irw_mti_i      => mti,
+    irq_mei_i      => mei
   );
 
 
