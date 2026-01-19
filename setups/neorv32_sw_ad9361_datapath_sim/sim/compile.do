@@ -18,9 +18,17 @@ set vivado_questa_dir "$sim_dir/../NEORV32_Simulation.ip_user_files/sim_scripts/
 # ================================================================================
 # These libraries are pre-compiled using Vivado's compile_simlib command:
 #   compile_simlib -simulator questa -simulator_exec_path {path_to_questa} ...
+#
+# Create a symlink to your pre-compiled libraries:
+#   Linux:   ln -s /path/to/Questa_Libraries_Vivado libraries
+#   Windows: mklink /D libraries C:\path\to\Questa_Libraries_Vivado
 # ================================================================================
 
-set XILINX_QUESTA_LIBS "C:/Work/Questa_Libraries_Vivado"
+if {[file exists "$sim_dir/libraries"]} {
+    set XILINX_QUESTA_LIBS [file normalize "$sim_dir/libraries"]
+} else {
+    error "Create a symlink to your Xilinx Questa libraries:\n  Linux:   ln -s /path/to/Questa_Libraries_Vivado $sim_dir/libraries\n  Windows: mklink /D libraries C:\\path\\to\\Questa_Libraries_Vivado"
+}
 
 # ================================================================================
 # Validate pre-compiled libraries exist

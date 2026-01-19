@@ -174,24 +174,28 @@ Run this command in Vivado's Tcl console to compile all Xilinx simulation librar
 
 ```tcl
 compile_simlib -simulator questa \
-    -simulator_exec_path {C:/Program Files/Mentor_Graphics/Questa_Prime_2025.1/win64} \
+    -simulator_exec_path {/path/to/questa/bin} \
     -family all \
     -language all \
     -library all \
-    -dir {C:/Work/Questa_Libraries_Vivado}
+    -dir {/path/to/Questa_Libraries_Vivado}
 ```
 
 This takes 15-30 minutes and creates libraries in the specified directory.
 
 ### Library Configuration
 
-If you used a different library path than `C:/Work/Questa_Libraries_Vivado`, update the `XILINX_QUESTA_LIBS` variable in `compile.do`:
+Create a symlink named `libraries` in the `sim/` directory pointing to your pre-compiled Xilinx libraries:
 
-```tcl
-set XILINX_QUESTA_LIBS "C:/Work/Questa_Libraries_Vivado"
+```bash
+# Linux/macOS
+ln -s /path/to/Questa_Libraries_Vivado libraries
+
+# Windows (run as Administrator)
+mklink /D libraries C:\path\to\Questa_Libraries_Vivado
 ```
 
-Also update the `sim/libraries` symlink to point to your library location (see [Library Symlink Setup](#library-symlink-setup-one-time)).
+The `compile.do` script will automatically use this symlink.
 
 ### Required Libraries
 
