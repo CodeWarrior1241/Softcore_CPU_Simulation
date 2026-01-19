@@ -70,7 +70,6 @@ sim/GHDL/work/
 *.sim/
 *.srcs/
 *.xpr
-*.xdc
 .Xil/
 *.jou
 *.str
