@@ -39,10 +39,7 @@ variable qpsk_snapshot_bram "QPSK_Snapshot_BRAM"
 
 # AD9361 core and datapath
 variable axi_ad9361 "axi_ad9361"
-variable util_ad9361_adc_fifo "util_ad9361_adc_fifo"
-variable util_ad9361_adc_pack "util_ad9361_adc_pack"
-variable axi_ad9361_dac_fifo "axi_ad9361_dac_fifo"
-variable util_ad9361_dac_upack "util_ad9361_dac_upack"
+variable axi_ad9361_adapter "axi_ad9361_adapter"
 
 # Clock divider logic for AD9361 sampling clock
 variable util_ad9361_divclk "util_ad9361_divclk"
@@ -110,7 +107,7 @@ proc build_all {adi_ip_dir} {
     global project_name part project_dir top_level_bd_name
     global neorv32_cpu ecs_clock_300_mhz cpu_sys_reset neorv32_cpu_input_reset axi_cpu_interconnect
     global axi_bram_controller qpsk_snapshot_bram
-    global axi_ad9361 util_ad9361_adc_fifo util_ad9361_adc_pack axi_ad9361_dac_fifo util_ad9361_dac_upack
+    global axi_ad9361 axi_ad9361_adapter
     global util_ad9361_divclk util_ad9361_divclk_sel util_ad9361_divclk_sel_concat util_ad9361_divclk_reset
 
     # Normalize and validate ADI IP directory
@@ -183,63 +180,18 @@ source $neorv32_home/rtl/system_integration/neorv32_vivado_ip.tcl
 # Our project should still be current, but the block design may need reopening.
 
 ###############################################################################
-# Build AXI AD9361 Adapter HLS IP
+# AXI AD9361 Adapter HLS IP
 ###############################################################################
 
-puts "INFO: Building AXI AD9361 Adapter HLS IP..."
-set hls_src_dir "$project_dir/src/axiad9361_adapter"
-set hls_ip_dir "$project_dir/hls_ip"
-set hls_config_file "$hls_src_dir/axi_ad9361_adapter.cfg"
-set hls_work_dir "$hls_src_dir/work"
+# Use pre-built HLS IP from the impl/ip directory
+set hls_ip_dir "$project_dir/src/axiad9361_adapter/axiad9361_adapter/hls/impl/ip"
 
-# Check if HLS IP already exists (skip rebuild if so)
-set hls_ip_exists 0
-if {[file exists $hls_ip_dir]} {
-    set zip_files [glob -nocomplain -directory $hls_ip_dir *.zip]
-    if {[llength $zip_files] > 0} {
-        set hls_ip_exists 1
-        puts "INFO: HLS IP already exists at $hls_ip_dir, skipping build..."
-    }
+if {![file exists $hls_ip_dir]} {
+    puts "ERROR: HLS IP directory not found: $hls_ip_dir"
+    puts "       Please build the HLS IP first using Vitis HLS."
+    return -1
 }
-
-if {!$hls_ip_exists} {
-    # Verify HLS source files exist
-    if {![file exists $hls_config_file]} {
-        puts "ERROR: HLS config file not found: $hls_config_file"
-        return -1
-    }
-
-    # Run Vitis HLS C Synthesis
-    puts "INFO: Running Vitis HLS C Synthesis..."
-    if {[catch {exec v++ --compile --mode hls --config $hls_config_file --work_dir $hls_work_dir} result]} {
-        puts "ERROR: HLS C Synthesis failed:"
-        puts $result
-        return -1
-    }
-    puts "INFO: HLS C Synthesis complete."
-
-    # Run Vitis HLS IP Packaging
-    puts "INFO: Running Vitis HLS IP Packaging..."
-    if {[catch {exec v++ --package --mode hls --config $hls_config_file --work_dir $hls_work_dir} result]} {
-        puts "ERROR: HLS IP Packaging failed:"
-        puts $result
-        return -1
-    }
-    puts "INFO: HLS IP Packaging complete."
-
-    # Copy generated IP to output directory
-    file mkdir $hls_ip_dir
-    foreach zip_file [glob -nocomplain -directory $hls_work_dir *.zip] {
-        puts "INFO: Copying [file tail $zip_file] to $hls_ip_dir"
-        file copy -force $zip_file $hls_ip_dir/
-    }
-
-    # Also check in impl subdirectory (common HLS output location)
-    foreach zip_file [glob -nocomplain -directory "$hls_work_dir" -type f "*.zip"] {
-        puts "INFO: Copying [file tail $zip_file] to $hls_ip_dir"
-        file copy -force $zip_file $hls_ip_dir/
-    }
-}
+puts "INFO: Using pre-built HLS IP from: $hls_ip_dir"
 
 # Add NEORV32 IP, ADI IP, and HLS IP to our project's repository paths
 puts "INFO: Adding NEORV32 IP, ADI IP, and HLS IP to repository..."
@@ -366,10 +318,10 @@ startgroup
 endgroup
 
 # Create the main AXI CPU interconnect
-# NUM_MI = 2: one for BRAM controller, one for axi_ad9361
+# NUM_MI = 3: BRAM controller, axi_ad9361, axi_ad9361_adapter
 create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 $axi_cpu_interconnect
 set_property -dict [list \
-    CONFIG.NUM_MI {2} \
+    CONFIG.NUM_MI {3} \
     CONFIG.NUM_SI {1} \
 ] [get_bd_cells $axi_cpu_interconnect]
 
@@ -506,144 +458,72 @@ connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins $uti
 connect_bd_net [get_bd_pins $util_ad9361_divclk/clk_out] [get_bd_pins $util_ad9361_divclk_reset/slowest_sync_clk]
 
 ###############################################################################
-# ADC/DAC util components
+# AXI AD9361 Adapter (HLS IP)
+# Replaces: util_ad9361_adc_fifo, util_ad9361_adc_pack,
+#           axi_ad9361_dac_fifo, util_ad9361_dac_upack
+# Provides: Internal TX/RX BRAMs, loopback capability, AXI-Lite control
 ###############################################################################
 
-# ADC Channel Packer (util_cpack2)
-create_bd_cell -type ip -vlnv analog.com:user:util_cpack2:1.0 $util_ad9361_adc_pack
-set_property -dict [list \
-    CONFIG.NUM_OF_CHANNELS {4} \
-    CONFIG.SAMPLE_DATA_WIDTH {16} \
-] [get_bd_cells $util_ad9361_adc_pack]
+puts "INFO: Instantiating AXI AD9361 Adapter..."
 
-# DAC Channel Unpacker (util_upack2)
-create_bd_cell -type ip -vlnv analog.com:user:util_upack2:1.0 $util_ad9361_dac_upack
-set_property -dict [list \
-    CONFIG.NUM_OF_CHANNELS {4} \
-    CONFIG.SAMPLE_DATA_WIDTH {16} \
-] [get_bd_cells $util_ad9361_dac_upack]
+# Create the HLS adapter IP
+create_bd_cell -type ip -vlnv user:hls:axi_ad9361_adapter:3.0 $axi_ad9361_adapter
 
-###############################################################################
-# ADC Path: util_wfifo -> util_cpack2
-###############################################################################
+# Connect adapter clock and reset (uses AXI clock domain)
+connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1] [get_bd_pins $axi_ad9361_adapter/ap_clk]
+connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins $axi_ad9361_adapter/ap_rst_n]
 
-puts "INFO: Creating ADC datapath..."
+# Connect ADC data from axi_ad9361 to adapter
+# Channel 0 I/Q
+connect_bd_net [get_bd_pins $axi_ad9361/adc_data_i0] [get_bd_pins $axi_ad9361_adapter/adc_data_i0]
+connect_bd_net [get_bd_pins $axi_ad9361/adc_data_q0] [get_bd_pins $axi_ad9361_adapter/adc_data_q0]
+connect_bd_net [get_bd_pins $axi_ad9361/adc_enable_i0] [get_bd_pins $axi_ad9361_adapter/adc_enable_i0]
+connect_bd_net [get_bd_pins $axi_ad9361/adc_enable_q0] [get_bd_pins $axi_ad9361_adapter/adc_enable_q0]
+connect_bd_net [get_bd_pins $axi_ad9361/adc_valid_i0] [get_bd_pins $axi_ad9361_adapter/adc_valid_i0]
+connect_bd_net [get_bd_pins $axi_ad9361/adc_valid_q0] [get_bd_pins $axi_ad9361_adapter/adc_valid_q0]
 
-# ADC FIFO (util_wfifo)
-create_bd_cell -type ip -vlnv analog.com:user:util_wfifo:1.0 $util_ad9361_adc_fifo
-set_property -dict [list \
-    CONFIG.NUM_OF_CHANNELS {4} \
-    CONFIG.DIN_ADDRESS_WIDTH {4} \
-    CONFIG.DIN_DATA_WIDTH {16} \
-    CONFIG.DOUT_DATA_WIDTH {16} \
-] [get_bd_cells $util_ad9361_adc_fifo]
+# Channel 1 I/Q
+connect_bd_net [get_bd_pins $axi_ad9361/adc_data_i1] [get_bd_pins $axi_ad9361_adapter/adc_data_i1]
+connect_bd_net [get_bd_pins $axi_ad9361/adc_data_q1] [get_bd_pins $axi_ad9361_adapter/adc_data_q1]
+connect_bd_net [get_bd_pins $axi_ad9361/adc_enable_i1] [get_bd_pins $axi_ad9361_adapter/adc_enable_i1]
+connect_bd_net [get_bd_pins $axi_ad9361/adc_enable_q1] [get_bd_pins $axi_ad9361_adapter/adc_enable_q1]
+connect_bd_net [get_bd_pins $axi_ad9361/adc_valid_i1] [get_bd_pins $axi_ad9361_adapter/adc_valid_i1]
+connect_bd_net [get_bd_pins $axi_ad9361/adc_valid_q1] [get_bd_pins $axi_ad9361_adapter/adc_valid_q1]
 
-# Connect ADC FIFO clocks and resets
-connect_bd_net [get_bd_pins $axi_ad9361/l_clk] [get_bd_pins $util_ad9361_adc_fifo/din_clk]
-connect_bd_net [get_bd_pins $axi_ad9361/rst] [get_bd_pins $util_ad9361_adc_fifo/din_rst]
-connect_bd_net [get_bd_pins $util_ad9361_divclk/clk_out] [get_bd_pins $util_ad9361_adc_fifo/dout_clk]
-connect_bd_net [get_bd_pins $util_ad9361_divclk_reset/peripheral_aresetn] [get_bd_pins $util_ad9361_adc_fifo/dout_rstn]
+# ADC overflow handling
+# Note: Both axi_ad9361 and adapter have adc_dovf as INPUTS (from external FIFO in ADI designs)
+# In our simplified design without external FIFOs, tie to constant 0 (no overflow source)
+create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 adc_dovf_const
+set_property -dict [list CONFIG.CONST_VAL {0} CONFIG.CONST_WIDTH {1}] [get_bd_cells adc_dovf_const]
+connect_bd_net [get_bd_pins adc_dovf_const/dout] [get_bd_pins $axi_ad9361/adc_dovf]
+connect_bd_net [get_bd_pins adc_dovf_const/dout] [get_bd_pins $axi_ad9361_adapter/adc_dovf]
 
-# Connect ADC FIFO data inputs from AD9361 (4 channels: I0, Q0, I1, Q1)
-connect_bd_net [get_bd_pins $axi_ad9361/adc_enable_i0] [get_bd_pins $util_ad9361_adc_fifo/din_enable_0]
-connect_bd_net [get_bd_pins $axi_ad9361/adc_valid_i0] [get_bd_pins $util_ad9361_adc_fifo/din_valid_0]
-connect_bd_net [get_bd_pins $axi_ad9361/adc_data_i0] [get_bd_pins $util_ad9361_adc_fifo/din_data_0]
-connect_bd_net [get_bd_pins $axi_ad9361/adc_enable_q0] [get_bd_pins $util_ad9361_adc_fifo/din_enable_1]
-connect_bd_net [get_bd_pins $axi_ad9361/adc_valid_q0] [get_bd_pins $util_ad9361_adc_fifo/din_valid_1]
-connect_bd_net [get_bd_pins $axi_ad9361/adc_data_q0] [get_bd_pins $util_ad9361_adc_fifo/din_data_1]
-connect_bd_net [get_bd_pins $axi_ad9361/adc_enable_i1] [get_bd_pins $util_ad9361_adc_fifo/din_enable_2]
-connect_bd_net [get_bd_pins $axi_ad9361/adc_valid_i1] [get_bd_pins $util_ad9361_adc_fifo/din_valid_2]
-connect_bd_net [get_bd_pins $axi_ad9361/adc_data_i1] [get_bd_pins $util_ad9361_adc_fifo/din_data_2]
-connect_bd_net [get_bd_pins $axi_ad9361/adc_enable_q1] [get_bd_pins $util_ad9361_adc_fifo/din_enable_3]
-connect_bd_net [get_bd_pins $axi_ad9361/adc_valid_q1] [get_bd_pins $util_ad9361_adc_fifo/din_valid_3]
-connect_bd_net [get_bd_pins $axi_ad9361/adc_data_q1] [get_bd_pins $util_ad9361_adc_fifo/din_data_3]
+# Connect DAC data from adapter to axi_ad9361 (adapter OUTPUT -> axi_ad9361 INPUT)
+# Channel 0 I/Q
+connect_bd_net [get_bd_pins $axi_ad9361_adapter/dac_data_i0] [get_bd_pins $axi_ad9361/dac_data_i0]
+connect_bd_net [get_bd_pins $axi_ad9361_adapter/dac_data_q0] [get_bd_pins $axi_ad9361/dac_data_q0]
 
-# Connect overflow signal
-connect_bd_net [get_bd_pins $util_ad9361_adc_fifo/din_ovf] [get_bd_pins $axi_ad9361/adc_dovf]
+# Channel 1 I/Q
+connect_bd_net [get_bd_pins $axi_ad9361_adapter/dac_data_i1] [get_bd_pins $axi_ad9361/dac_data_i1]
+connect_bd_net [get_bd_pins $axi_ad9361_adapter/dac_data_q1] [get_bd_pins $axi_ad9361/dac_data_q1]
 
-# Connect ADC pack clocks and resets
-connect_bd_net [get_bd_pins $util_ad9361_divclk/clk_out] [get_bd_pins $util_ad9361_adc_pack/clk]
-connect_bd_net [get_bd_pins $util_ad9361_divclk_reset/peripheral_reset] [get_bd_pins $util_ad9361_adc_pack/reset]
+# Connect DAC control signals from axi_ad9361 to adapter (axi_ad9361 OUTPUT -> adapter INPUT)
+# dac_valid_* indicates "axi_ad9361 wants data now"
+# dac_enable_* indicates which channels are active
+# Channel 0 I/Q
+connect_bd_net [get_bd_pins $axi_ad9361/dac_valid_i0] [get_bd_pins $axi_ad9361_adapter/dac_valid_i0]
+connect_bd_net [get_bd_pins $axi_ad9361/dac_valid_q0] [get_bd_pins $axi_ad9361_adapter/dac_valid_q0]
+connect_bd_net [get_bd_pins $axi_ad9361/dac_enable_i0] [get_bd_pins $axi_ad9361_adapter/dac_enable_i0]
+connect_bd_net [get_bd_pins $axi_ad9361/dac_enable_q0] [get_bd_pins $axi_ad9361_adapter/dac_enable_q0]
 
-# Connect ADC FIFO outputs to pack inputs
-connect_bd_net [get_bd_pins $util_ad9361_adc_fifo/dout_valid_0] [get_bd_pins $util_ad9361_adc_pack/fifo_wr_en]
-connect_bd_net [get_bd_pins $util_ad9361_adc_pack/fifo_wr_overflow] [get_bd_pins $util_ad9361_adc_fifo/dout_ovf]
+# Channel 1 I/Q
+connect_bd_net [get_bd_pins $axi_ad9361/dac_valid_i1] [get_bd_pins $axi_ad9361_adapter/dac_valid_i1]
+connect_bd_net [get_bd_pins $axi_ad9361/dac_valid_q1] [get_bd_pins $axi_ad9361_adapter/dac_valid_q1]
+connect_bd_net [get_bd_pins $axi_ad9361/dac_enable_i1] [get_bd_pins $axi_ad9361_adapter/dac_enable_i1]
+connect_bd_net [get_bd_pins $axi_ad9361/dac_enable_q1] [get_bd_pins $axi_ad9361_adapter/dac_enable_q1]
 
-# Connect 4 channels from FIFO to pack
-connect_bd_net [get_bd_pins $util_ad9361_adc_fifo/dout_enable_0] [get_bd_pins $util_ad9361_adc_pack/enable_0]
-connect_bd_net [get_bd_pins $util_ad9361_adc_fifo/dout_data_0] [get_bd_pins $util_ad9361_adc_pack/fifo_wr_data_0]
-connect_bd_net [get_bd_pins $util_ad9361_adc_fifo/dout_enable_1] [get_bd_pins $util_ad9361_adc_pack/enable_1]
-connect_bd_net [get_bd_pins $util_ad9361_adc_fifo/dout_data_1] [get_bd_pins $util_ad9361_adc_pack/fifo_wr_data_1]
-connect_bd_net [get_bd_pins $util_ad9361_adc_fifo/dout_enable_2] [get_bd_pins $util_ad9361_adc_pack/enable_2]
-connect_bd_net [get_bd_pins $util_ad9361_adc_fifo/dout_data_2] [get_bd_pins $util_ad9361_adc_pack/fifo_wr_data_2]
-connect_bd_net [get_bd_pins $util_ad9361_adc_fifo/dout_enable_3] [get_bd_pins $util_ad9361_adc_pack/enable_3]
-connect_bd_net [get_bd_pins $util_ad9361_adc_fifo/dout_data_3] [get_bd_pins $util_ad9361_adc_pack/fifo_wr_data_3]
-
-# Connect ADC pack output to DAC upack input (internal loopback)
-# This creates a direct path: ADC -> FIFO -> pack -> upack -> FIFO -> DAC
-connect_bd_net [get_bd_pins $util_ad9361_adc_pack/packed_fifo_wr_en] [get_bd_pins $util_ad9361_dac_upack/s_axis_valid]
-connect_bd_net [get_bd_pins $util_ad9361_adc_pack/packed_fifo_wr_data] [get_bd_pins $util_ad9361_dac_upack/s_axis_data]
-
-###############################################################################
-# DAC Path: util_upack2 -> util_rfifo
-###############################################################################
-
-puts "INFO: Creating DAC datapath..."
-
-# DAC FIFO (util_rfifo)
-create_bd_cell -type ip -vlnv analog.com:user:util_rfifo:1.0 $axi_ad9361_dac_fifo
-set_property -dict [list \
-    CONFIG.DIN_DATA_WIDTH {16} \
-    CONFIG.DOUT_DATA_WIDTH {16} \
-    CONFIG.DIN_ADDRESS_WIDTH {4} \
-] [get_bd_cells $axi_ad9361_dac_fifo]
-
-# Connect DAC FIFO clocks and resets
-connect_bd_net [get_bd_pins $axi_ad9361/l_clk] [get_bd_pins $axi_ad9361_dac_fifo/dout_clk]
-connect_bd_net [get_bd_pins $axi_ad9361/rst] [get_bd_pins $axi_ad9361_dac_fifo/dout_rst]
-connect_bd_net [get_bd_pins $util_ad9361_divclk/clk_out] [get_bd_pins $axi_ad9361_dac_fifo/din_clk]
-connect_bd_net [get_bd_pins $util_ad9361_divclk_reset/peripheral_aresetn] [get_bd_pins $axi_ad9361_dac_fifo/din_rstn]
-
-# Connect DAC FIFO outputs to AD9361 (4 channels: I0, Q0, I1, Q1)
-connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_enable_0] [get_bd_pins $axi_ad9361/dac_enable_i0]
-connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_valid_0] [get_bd_pins $axi_ad9361/dac_valid_i0]
-connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_data_0] [get_bd_pins $axi_ad9361/dac_data_i0]
-connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_enable_1] [get_bd_pins $axi_ad9361/dac_enable_q0]
-connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_valid_1] [get_bd_pins $axi_ad9361/dac_valid_q0]
-connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_data_1] [get_bd_pins $axi_ad9361/dac_data_q0]
-connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_enable_2] [get_bd_pins $axi_ad9361/dac_enable_i1]
-connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_valid_2] [get_bd_pins $axi_ad9361/dac_valid_i1]
-connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_data_2] [get_bd_pins $axi_ad9361/dac_data_i1]
-connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_enable_3] [get_bd_pins $axi_ad9361/dac_enable_q1]
-connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_valid_3] [get_bd_pins $axi_ad9361/dac_valid_q1]
-connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_data_3] [get_bd_pins $axi_ad9361/dac_data_q1]
-
-# Connect underflow signal
-connect_bd_net [get_bd_pins $axi_ad9361_dac_fifo/dout_unf] [get_bd_pins $axi_ad9361/dac_dunf]
-
-# Connect DAC upack clocks and resets
-connect_bd_net [get_bd_pins $util_ad9361_divclk/clk_out] [get_bd_pins $util_ad9361_dac_upack/clk]
-connect_bd_net [get_bd_pins $util_ad9361_divclk_reset/peripheral_reset] [get_bd_pins $util_ad9361_dac_upack/reset]
-
-# Connect DAC upack outputs to FIFO inputs
-connect_bd_net [get_bd_pins $util_ad9361_dac_upack/fifo_rd_en] [get_bd_pins $axi_ad9361_dac_fifo/din_valid_0]
-connect_bd_net [get_bd_pins $util_ad9361_dac_upack/fifo_rd_underflow] [get_bd_pins $axi_ad9361_dac_fifo/din_unf]
-
-# Connect 4 channels from upack to FIFO
-connect_bd_net [get_bd_pins $util_ad9361_dac_upack/enable_0] [get_bd_pins $axi_ad9361_dac_fifo/din_enable_0]
-connect_bd_net [get_bd_pins $util_ad9361_dac_upack/fifo_rd_valid] [get_bd_pins $axi_ad9361_dac_fifo/din_valid_in_0]
-connect_bd_net [get_bd_pins $util_ad9361_dac_upack/fifo_rd_data_0] [get_bd_pins $axi_ad9361_dac_fifo/din_data_0]
-connect_bd_net [get_bd_pins $util_ad9361_dac_upack/enable_1] [get_bd_pins $axi_ad9361_dac_fifo/din_enable_1]
-connect_bd_net [get_bd_pins $util_ad9361_dac_upack/fifo_rd_valid] [get_bd_pins $axi_ad9361_dac_fifo/din_valid_in_1]
-connect_bd_net [get_bd_pins $util_ad9361_dac_upack/fifo_rd_data_1] [get_bd_pins $axi_ad9361_dac_fifo/din_data_1]
-connect_bd_net [get_bd_pins $util_ad9361_dac_upack/enable_2] [get_bd_pins $axi_ad9361_dac_fifo/din_enable_2]
-connect_bd_net [get_bd_pins $util_ad9361_dac_upack/fifo_rd_valid] [get_bd_pins $axi_ad9361_dac_fifo/din_valid_in_2]
-connect_bd_net [get_bd_pins $util_ad9361_dac_upack/fifo_rd_data_2] [get_bd_pins $axi_ad9361_dac_fifo/din_data_2]
-connect_bd_net [get_bd_pins $util_ad9361_dac_upack/enable_3] [get_bd_pins $axi_ad9361_dac_fifo/din_enable_3]
-connect_bd_net [get_bd_pins $util_ad9361_dac_upack/fifo_rd_valid] [get_bd_pins $axi_ad9361_dac_fifo/din_valid_in_3]
-connect_bd_net [get_bd_pins $util_ad9361_dac_upack/fifo_rd_data_3] [get_bd_pins $axi_ad9361_dac_fifo/din_data_3]
-
-# NOTE: util_ad9361_dac_upack/s_axis is connected to util_ad9361_adc_pack output above
+# Connect DAC underflow from adapter to axi_ad9361 (adapter OUTPUT -> axi_ad9361 INPUT)
+connect_bd_net [get_bd_pins $axi_ad9361_adapter/dac_dunf] [get_bd_pins $axi_ad9361/dac_dunf]
 
 ###############################################################################
 # AXI and Reset Connections
@@ -668,8 +548,10 @@ connect_bd_intf_net [get_bd_intf_pins $axi_bram_controller/S_AXI] [get_bd_intf_p
 connect_bd_intf_net [get_bd_intf_pins $axi_bram_controller/BRAM_PORTA] [get_bd_intf_pins $qpsk_snapshot_bram/BRAM_PORTA]
 
 # Connect axi_ad9361 AXI interface
-# NOTE: AXI clock/reset connections for axi_ad9361 to be added manually
 connect_bd_intf_net [get_bd_intf_pins $axi_ad9361/s_axi] [get_bd_intf_pins $axi_cpu_interconnect/M01_AXI]
+
+# Connect axi_ad9361_adapter AXI-Lite control interface
+connect_bd_intf_net [get_bd_intf_pins $axi_ad9361_adapter/s_axi_ctrl] [get_bd_intf_pins $axi_cpu_interconnect/M02_AXI]
 
 ###############################################################################
 # Address Assignment
@@ -686,6 +568,11 @@ set_property range 32K [get_bd_addr_segs {NEORV32_RISC_V/m_axi/SEG_AXI_BRAM_Cont
 assign_bd_address -target_address_space /$neorv32_cpu/m_axi [get_bd_addr_segs $axi_ad9361/s_axi/axi_lite] -force
 set_property offset 0x44A00000 [get_bd_addr_segs {NEORV32_RISC_V/m_axi/SEG_axi_ad9361_axi_lite}]
 set_property range 64K [get_bd_addr_segs {NEORV32_RISC_V/m_axi/SEG_axi_ad9361_axi_lite}]
+
+# axi_ad9361_adapter at 0x44A10000 (16KB range)
+assign_bd_address -target_address_space /$neorv32_cpu/m_axi [get_bd_addr_segs $axi_ad9361_adapter/s_axi_ctrl/Reg] -force
+set_property offset 0x44A10000 [get_bd_addr_segs {NEORV32_RISC_V/m_axi/SEG_axi_ad9361_adapter_Reg}]
+set_property range 16K [get_bd_addr_segs {NEORV32_RISC_V/m_axi/SEG_axi_ad9361_adapter_Reg}]
 
 ###############################################################################
 # Save and Generate
@@ -717,10 +604,7 @@ catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_cpu_int
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_bram_controller}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${qpsk_snapshot_bram}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_ad9361}_0] }
-catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${util_ad9361_adc_fifo}_0] }
-catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${util_ad9361_adc_pack}_0] }
-catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_ad9361_dac_fifo}_0] }
-catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${util_ad9361_dac_upack}_0] }
+catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_ad9361_adapter}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${util_ad9361_divclk}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${util_ad9361_divclk_sel}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${util_ad9361_divclk_sel_concat}_0] }
@@ -737,10 +621,7 @@ set ip_synth_runs [list \
     ${top_level_bd_name}_${axi_bram_controller}_0_synth_1 \
     ${top_level_bd_name}_${qpsk_snapshot_bram}_0_synth_1 \
     ${top_level_bd_name}_${axi_ad9361}_0_synth_1 \
-    ${top_level_bd_name}_${util_ad9361_adc_fifo}_0_synth_1 \
-    ${top_level_bd_name}_${util_ad9361_adc_pack}_0_synth_1 \
-    ${top_level_bd_name}_${axi_ad9361_dac_fifo}_0_synth_1 \
-    ${top_level_bd_name}_${util_ad9361_dac_upack}_0_synth_1 \
+    ${top_level_bd_name}_${axi_ad9361_adapter}_0_synth_1 \
     ${top_level_bd_name}_${util_ad9361_divclk}_0_synth_1 \
     ${top_level_bd_name}_${util_ad9361_divclk_sel}_0_synth_1 \
     ${top_level_bd_name}_${util_ad9361_divclk_sel_concat}_0_synth_1 \

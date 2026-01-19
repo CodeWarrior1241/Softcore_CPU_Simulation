@@ -205,14 +205,17 @@ void axi_ad9361_adapter(
     valid_t      adc_enable_q1,
 
     // TX data to axi_ad9361 (directly driven, no AXI-Stream)
+    // Note: dac_valid_* and dac_enable_* are INPUTS from axi_ad9361
+    // The axi_ad9361 drives dac_valid to indicate "I want data now"
+    // We respond by providing data on dac_data_* when dac_valid is asserted
     iq_sample_t& dac_data_i0,
     iq_sample_t& dac_data_q0,
     iq_sample_t& dac_data_i1,
     iq_sample_t& dac_data_q1,
-    valid_t&     dac_valid_i0,
-    valid_t&     dac_valid_q0,
-    valid_t&     dac_valid_i1,
-    valid_t&     dac_valid_q1,
+    valid_t      dac_valid_i0,
+    valid_t      dac_valid_q0,
+    valid_t      dac_valid_i1,
+    valid_t      dac_valid_q1,
     valid_t      dac_enable_i0,
     valid_t      dac_enable_q0,
     valid_t      dac_enable_i1,

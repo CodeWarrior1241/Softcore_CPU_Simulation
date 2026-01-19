@@ -143,14 +143,15 @@ static axi_reg_t reg_loopback = 0;
 //==============================================================================
 
 // Call adapter once (simulates one clock cycle)
+// Note: dac_valid_* are now INPUTS - they simulate axi_ad9361 requesting data
+// When dac_valid=1, the adapter should output data from TX BRAM
 void run_adapter_cycle(
     iq_sample_t adc_i0, iq_sample_t adc_q0,
     iq_sample_t adc_i1, iq_sample_t adc_q1,
     valid_t adc_valid,
+    valid_t dac_valid,  // Input: simulates axi_ad9361 requesting TX data
     iq_sample_t& dac_i0, iq_sample_t& dac_q0,
-    iq_sample_t& dac_i1, iq_sample_t& dac_q1,
-    valid_t& dac_valid_i0, valid_t& dac_valid_q0,
-    valid_t& dac_valid_i1, valid_t& dac_valid_q1
+    iq_sample_t& dac_i1, iq_sample_t& dac_q1
 ) {
     valid_t adc_enable_i0 = 1, adc_enable_q0 = 1, adc_enable_i1 = 1, adc_enable_q1 = 1;
     valid_t dac_enable_i0 = 1, dac_enable_q0 = 1, dac_enable_i1 = 1, dac_enable_q1 = 1;
@@ -166,7 +167,7 @@ void run_adapter_cycle(
         adc_valid, adc_valid, adc_valid, adc_valid,
         adc_enable_i0, adc_enable_q0, adc_enable_i1, adc_enable_q1,
         dac_i0, dac_q0, dac_i1, dac_q1,
-        dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1,
+        dac_valid, dac_valid, dac_valid, dac_valid,  // dac_valid_* are inputs
         dac_enable_i0, dac_enable_q0, dac_enable_i1, dac_enable_q1,
         adc_dovf, dac_dunf
     );
@@ -208,11 +209,10 @@ void reset_adapter() {
     reg_loopback = 0;
 
     iq_sample_t dac_i0, dac_q0, dac_i1, dac_q1;
-    valid_t dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1;
 
-    run_adapter_cycle(0, 0, 0, 0, 0,
-                      dac_i0, dac_q0, dac_i1, dac_q1,
-                      dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+    // adc_valid=0, dac_valid=0 (no data transfer during reset)
+    run_adapter_cycle(0, 0, 0, 0, 0, 0,
+                      dac_i0, dac_q0, dac_i1, dac_q1);
 }
 
 // Print sample values
@@ -248,9 +248,9 @@ int test_tx_continuous_cycling() {
     reg_tx_ctrl = (1 << CtrlBits::TX_CH0_EN) | (1 << CtrlBits::TX_CH1_EN);
 
     iq_sample_t dac_i0, dac_q0, dac_i1, dac_q1;
-    valid_t dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1;
 
     std::cout << "Running TX continuous cycling..." << std::endl;
+    std::cout << "(dac_valid=1 simulates axi_ad9361 requesting data)" << std::endl;
 
     // Run for more than BRAM_DEPTH to verify wrap-around
     int wrap_count = 0;
@@ -258,12 +258,12 @@ int test_tx_continuous_cycling() {
     bool first_captured = false;
 
     for (int i = 0; i < IPInfo::BRAM_DEPTH * 2 + 100; i++) {
-        run_adapter_cycle(0, 0, 0, 0, 0,
-                          dac_i0, dac_q0, dac_i1, dac_q1,
-                          dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+        // dac_valid=1: axi_ad9361 is requesting data
+        run_adapter_cycle(0, 0, 0, 0, 0, 1,
+                          dac_i0, dac_q0, dac_i1, dac_q1);
 
         // Capture first sample
-        if (!first_captured && dac_valid_i0) {
+        if (!first_captured) {
             first_i = dac_i0;
             first_q = dac_q0;
             first_captured = true;
@@ -332,18 +332,17 @@ int test_rx_fill_level() {
     reg_rx_ctrl = (1 << CtrlBits::RX_CH0_EN) | (1 << CtrlBits::RX_CH1_EN);
 
     iq_sample_t dac_i0, dac_q0, dac_i1, dac_q1;
-    valid_t dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1;
 
     std::cout << "Starting RX capture with ramp pattern..." << std::endl;
 
     // Feed test data into RX until buffer fills
+    // adc_valid=1, dac_valid=0 (only RX active, TX not requesting)
     for (int i = 0; i < IPInfo::BRAM_DEPTH + 100; i++) {
         iq_sample_t adc_i0 = (i * 5) & 0x7FFF;
         iq_sample_t adc_q0 = ((i * 5) + 2) & 0x7FFF;
 
-        run_adapter_cycle(adc_i0, adc_q0, 0, 0, 1,
-                          dac_i0, dac_q0, dac_i1, dac_q1,
-                          dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+        run_adapter_cycle(adc_i0, adc_q0, 0, 0, 1, 0,
+                          dac_i0, dac_q0, dac_i1, dac_q1);
 
         // Print fill level at key points
         if (i < 5 || i == IPInfo::BRAM_DEPTH - 1 || i == IPInfo::BRAM_DEPTH || i == IPInfo::BRAM_DEPTH + 10) {
@@ -415,16 +414,14 @@ int test_rx_clear() {
     // Continue from previous state (buffer should be full)
 
     iq_sample_t dac_i0, dac_q0, dac_i1, dac_q1;
-    valid_t dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1;
 
     std::cout << "Before clear: fill_level=" << reg_rx_fill.to_uint() << std::endl;
 
     // Clear RX buffer
     reg_ctrl |= (1 << CtrlBits::RX_CLEAR);
 
-    run_adapter_cycle(0, 0, 0, 0, 0,
-                      dac_i0, dac_q0, dac_i1, dac_q1,
-                      dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+    run_adapter_cycle(0, 0, 0, 0, 0, 0,
+                      dac_i0, dac_q0, dac_i1, dac_q1);
 
     std::cout << "After clear: fill_level=" << reg_rx_fill.to_uint() << std::endl;
 
@@ -449,9 +446,8 @@ int test_rx_clear() {
         iq_sample_t adc_i0 = 8000 + i;
         iq_sample_t adc_q0 = 9000 + i;
 
-        run_adapter_cycle(adc_i0, adc_q0, 0, 0, 1,
-                          dac_i0, dac_q0, dac_i1, dac_q1,
-                          dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+        run_adapter_cycle(adc_i0, adc_q0, 0, 0, 1, 0,
+                          dac_i0, dac_q0, dac_i1, dac_q1);
     }
 
     if (reg_rx_fill == 100) {
@@ -496,17 +492,17 @@ int test_loopback() {
     reg_loopback = (1 << CtrlBits::LOOPBACK_EN);
 
     iq_sample_t dac_i0, dac_q0, dac_i1, dac_q1;
-    valid_t dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1;
 
     std::cout << "Testing loopback (RX -> TX)..." << std::endl;
+    std::cout << "(adc_valid=1, dac_valid=1 for both paths active)" << std::endl;
 
     for (int i = 0; i < NUM_TEST_SAMPLES; i++) {
         iq_sample_t adc_i0 = 1000 + i * 100;
         iq_sample_t adc_q0 = 2000 + i * 100;
 
-        run_adapter_cycle(adc_i0, adc_q0, 0, 0, 1,
-                          dac_i0, dac_q0, dac_i1, dac_q1,
-                          dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+        // adc_valid=1, dac_valid=1: both RX capturing and TX outputting (loopback)
+        run_adapter_cycle(adc_i0, adc_q0, 0, 0, 1, 1,
+                          dac_i0, dac_q0, dac_i1, dac_q1);
 
         // In loopback, TX should match RX
         if (i < 10) {
@@ -547,11 +543,9 @@ int test_registers() {
     reg_scratch = 0x12345678;
 
     iq_sample_t dac_i0, dac_q0, dac_i1, dac_q1;
-    valid_t dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1;
 
-    run_adapter_cycle(0, 0, 0, 0, 0,
-                      dac_i0, dac_q0, dac_i1, dac_q1,
-                      dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+    run_adapter_cycle(0, 0, 0, 0, 0, 0,
+                      dac_i0, dac_q0, dac_i1, dac_q1);
 
     if (reg_scratch == 0x12345678) {
         std::cout << "  PASS: Scratch register readback correct" << std::endl;
@@ -567,18 +561,16 @@ int test_registers() {
     reg_ctrl = (1 << CtrlBits::ENABLE) | (1 << CtrlBits::RX_ENABLE);
     reg_rx_ctrl = (1 << CtrlBits::RX_CH0_EN);
     for (int i = 0; i < 50; i++) {
-        run_adapter_cycle(100, 200, 0, 0, 1,
-                          dac_i0, dac_q0, dac_i1, dac_q1,
-                          dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+        run_adapter_cycle(100, 200, 0, 0, 1, 0,
+                          dac_i0, dac_q0, dac_i1, dac_q1);
     }
 
     std::cout << "  Before reset: fill_level=" << reg_rx_fill.to_uint() << std::endl;
 
     // Apply soft reset
     reg_ctrl = (1 << CtrlBits::SOFT_RESET);
-    run_adapter_cycle(0, 0, 0, 0, 0,
-                      dac_i0, dac_q0, dac_i1, dac_q1,
-                      dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+    run_adapter_cycle(0, 0, 0, 0, 0, 0,
+                      dac_i0, dac_q0, dac_i1, dac_q1);
 
     std::cout << "  After reset: fill_level=" << reg_rx_fill.to_uint() << std::endl;
 
@@ -615,9 +607,9 @@ int test_simultaneous_txrx() {
     reg_tx_ctrl = (1 << CtrlBits::TX_CH0_EN) | (1 << CtrlBits::TX_CH1_EN);
 
     iq_sample_t dac_i0, dac_q0, dac_i1, dac_q1;
-    valid_t dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1;
 
     std::cout << "Running simultaneous TX cycling and RX capture..." << std::endl;
+    std::cout << "(adc_valid=1, dac_valid=1 for both paths active)" << std::endl;
 
     // Run for some cycles
     for (int i = 0; i < 500; i++) {
@@ -625,9 +617,9 @@ int test_simultaneous_txrx() {
         iq_sample_t adc_i0 = 30000 - i;
         iq_sample_t adc_q0 = 31000 - i;
 
-        run_adapter_cycle(adc_i0, adc_q0, 0, 0, 1,
-                          dac_i0, dac_q0, dac_i1, dac_q1,
-                          dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+        // Both adc_valid=1 and dac_valid=1 for simultaneous operation
+        run_adapter_cycle(adc_i0, adc_q0, 0, 0, 1, 1,
+                          dac_i0, dac_q0, dac_i1, dac_q1);
 
         if (i < 5) {
             std::cout << "  Cycle " << i << ": TX out I=" << dac_i0.to_int()
@@ -663,7 +655,7 @@ int test_simultaneous_txrx() {
     // Verify TX is outputting from BRAM (not RX data since loopback is off)
     // TX should be cycling through initialized BRAM
     std::cout << "\nVerifying TX is cycling independently from RX..." << std::endl;
-    if (dac_valid_i0 && reg_status[StatusBits::TX_ACTIVE]) {
+    if (reg_status[StatusBits::TX_ACTIVE]) {
         std::cout << "PASS: TX is active and outputting data" << std::endl;
     } else {
         std::cout << "ERROR: TX not active" << std::endl;
@@ -694,12 +686,10 @@ int test_full_flow_coe_data() {
     reg_tx_ctrl = 0;
 
     iq_sample_t dac_i0, dac_q0, dac_i1, dac_q1;
-    valid_t dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1;
 
     // Run a cycle to apply the change
-    run_adapter_cycle(0, 0, 0, 0, 0,
-                      dac_i0, dac_q0, dac_i1, dac_q1,
-                      dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+    run_adapter_cycle(0, 0, 0, 0, 0, 0,
+                      dac_i0, dac_q0, dac_i1, dac_q1);
 
     std::cout << "  TX disabled (reg_ctrl=0x" << std::hex << reg_ctrl.to_uint()
               << ", reg_tx_ctrl=0x" << reg_tx_ctrl.to_uint() << ")" << std::dec << std::endl;
@@ -708,18 +698,16 @@ int test_full_flow_coe_data() {
     std::cout << "Step 2: Disabling RX..." << std::endl;
     reg_rx_ctrl = 0;
 
-    run_adapter_cycle(0, 0, 0, 0, 0,
-                      dac_i0, dac_q0, dac_i1, dac_q1,
-                      dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+    run_adapter_cycle(0, 0, 0, 0, 0, 0,
+                      dac_i0, dac_q0, dac_i1, dac_q1);
 
     std::cout << "  RX disabled (reg_rx_ctrl=0x" << std::hex << reg_rx_ctrl.to_uint() << ")" << std::dec << std::endl;
 
     // Apply soft reset to clear any previous state
     std::cout << "  Applying soft reset..." << std::endl;
     reg_ctrl = (1 << CtrlBits::SOFT_RESET);
-    run_adapter_cycle(0, 0, 0, 0, 0,
-                      dac_i0, dac_q0, dac_i1, dac_q1,
-                      dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+    run_adapter_cycle(0, 0, 0, 0, 0, 0,
+                      dac_i0, dac_q0, dac_i1, dac_q1);
 
     // Clear RX BRAM
     for (int i = 0; i < IPInfo::BRAM_DEPTH; i++) {
@@ -755,9 +743,8 @@ int test_full_flow_coe_data() {
     reg_ctrl = (1 << CtrlBits::ENABLE) | (1 << CtrlBits::RX_ENABLE);
     reg_rx_ctrl = (1 << CtrlBits::RX_CH0_EN) | (1 << CtrlBits::RX_CH1_EN);
 
-    run_adapter_cycle(0, 0, 0, 0, 0,
-                      dac_i0, dac_q0, dac_i1, dac_q1,
-                      dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+    run_adapter_cycle(0, 0, 0, 0, 0, 0,
+                      dac_i0, dac_q0, dac_i1, dac_q1);
 
     std::cout << "  RX enabled (reg_ctrl=0x" << std::hex << reg_ctrl.to_uint()
               << ", reg_rx_ctrl=0x" << reg_rx_ctrl.to_uint() << ")" << std::dec << std::endl;
@@ -768,9 +755,8 @@ int test_full_flow_coe_data() {
     reg_tx_ctrl = (1 << CtrlBits::TX_CH0_EN) | (1 << CtrlBits::TX_CH1_EN);
     reg_loopback = (1 << CtrlBits::LOOPBACK_EN);
 
-    run_adapter_cycle(0, 0, 0, 0, 0,
-                      dac_i0, dac_q0, dac_i1, dac_q1,
-                      dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+    run_adapter_cycle(0, 0, 0, 0, 0, 0,
+                      dac_i0, dac_q0, dac_i1, dac_q1);
 
     std::cout << "  TX enabled with loopback (reg_ctrl=0x" << std::hex << reg_ctrl.to_uint()
               << ", reg_tx_ctrl=0x" << reg_tx_ctrl.to_uint()
@@ -779,6 +765,7 @@ int test_full_flow_coe_data() {
     // Run cycles until RX buffer fills (1024 samples)
     // In loopback mode, TX output goes to RX input
     std::cout << "\nRunning loopback transfer (TX BRAM -> RX BRAM)..." << std::endl;
+    std::cout << "(adc_valid=1, dac_valid=1 for loopback operation)" << std::endl;
     int cycle_count = 0;
     const int MAX_CYCLES = IPInfo::BRAM_DEPTH + 100;
 
@@ -792,9 +779,9 @@ int test_full_flow_coe_data() {
         iq_sample_t adc_i0 = tx_sample.range(15, 0);
         iq_sample_t adc_q0 = tx_sample.range(31, 16);
 
-        run_adapter_cycle(adc_i0, adc_q0, 0, 0, 1,
-                          dac_i0, dac_q0, dac_i1, dac_q1,
-                          dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+        // adc_valid=1 for RX capture, dac_valid=1 for TX output (loopback)
+        run_adapter_cycle(adc_i0, adc_q0, 0, 0, 1, 1,
+                          dac_i0, dac_q0, dac_i1, dac_q1);
 
         // Print progress at key points
         if (cycle_count < 5 || cycle_count == 512 || cycle_count == 1023 ||
@@ -879,9 +866,8 @@ int test_full_flow_coe_data() {
     // Clear RX buffer after reading (optional step to demonstrate RX_CLEAR)
     std::cout << "\n  Clearing RX buffer after read..." << std::endl;
     reg_ctrl |= (1 << CtrlBits::RX_CLEAR);
-    run_adapter_cycle(0, 0, 0, 0, 0,
-                      dac_i0, dac_q0, dac_i1, dac_q1,
-                      dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1);
+    run_adapter_cycle(0, 0, 0, 0, 0, 0,
+                      dac_i0, dac_q0, dac_i1, dac_q1);
 
     if (reg_rx_fill == 0) {
         std::cout << "  PASS: RX buffer cleared (fill_level=0)" << std::endl;

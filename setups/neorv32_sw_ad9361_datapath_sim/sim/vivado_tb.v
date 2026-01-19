@@ -4,7 +4,7 @@
 //
 // This testbench instantiates the Top_wrapper block design and provides:
 //   - Clock generation (300MHz differential input for PLL)
-//   - Reset sequencing (10ms reset period for CPU initialization)
+//   - Reset sequencing (1ms reset period for PLL lock and initialization)
 //   - AD9361 LVDS stimulus from COE file data (looped continuously)
 //   - TX to RX loopback for datapath verification
 //   - UART monitoring
@@ -44,7 +44,7 @@
 // Test Sequence
 //------------------------------------------------------------------------------
 //
-//  1. Reset held for 10ms (CPU initialization)
+//  1. Reset held for 1ms (PLL lock and initialization)
 //  2. PLL locks, clocks stable
 //  3. CPU enables AD9361 via GPIO (up_enable=1, up_txnrx=1)
 //  4. Testbench feeds COE data into LVDS RX (looped)
@@ -68,7 +68,7 @@ module vivado_tb;
     parameter real AD9361_CLK_PERIOD_NS = 8.0;   // 125 MHz AD9361 data clock
 
     // Simulation timing
-    parameter RESET_HOLD_NS = 10_000_000;        // 10ms reset hold for CPU init
+    parameter RESET_HOLD_NS = 1_000_000;         // 1ms reset hold for PLL lock
 
     // COE data parameters
     parameter NUM_COE_SAMPLES = 1024;            // Number of IQ samples in COE file
@@ -107,9 +107,6 @@ module vivado_tb;
     // AD9361 control signals
     wire enable;
     wire txnrx;
-
-    // Delay clock (300MHz for IODELAY calibration)
-    reg delay_clk;
 
     // Clock locked indicator (directly from PLL via external port)
     wire sim_clock_100MHz_locked;
@@ -186,10 +183,7 @@ module vivado_tb;
 
         // AD9361 control
         .enable                 (enable),
-        .txnrx                  (txnrx),
-
-        // Delay clock
-        .delay_clk              (delay_clk)
+        .txnrx                  (txnrx)
     );
 
     //--------------------------------------------------------------------------
@@ -208,19 +202,6 @@ module vivado_tb;
     end
 
     //--------------------------------------------------------------------------
-    // Clock Generation: Delay Clock (300MHz)
-    //--------------------------------------------------------------------------
-
-    initial begin
-        delay_clk = 1'b0;
-    end
-
-    always begin
-        #(ECS_CLK_PERIOD_NS / 2.0);
-        delay_clk = ~delay_clk;
-    end
-
-    //--------------------------------------------------------------------------
     // Load COE Data at Startup
     //--------------------------------------------------------------------------
 
@@ -228,6 +209,12 @@ module vivado_tb;
         // Load COE file data
         // Note: $readmemh expects hex values without the header
         $readmemh("qpsk_bram_data.hex", coe_data);
+
+        // Check if data was loaded (first sample should not be X)
+        if (coe_data[0] === 32'bx) begin
+            $error("Failed to load qpsk_bram_data.hex! Generate it with: python convert_coe_to_hex.py qpsk_bram_init.coe qpsk_bram_data.hex");
+            $fatal;
+        end
         $display("[%0t] Loaded %0d samples from COE data", $time, NUM_COE_SAMPLES);
     end
 
@@ -239,11 +226,11 @@ module vivado_tb;
         // Start with reset asserted
         system_resetn = 1'b0;
 
-        // Hold reset for 10ms to allow CPU initialization
+        // Hold reset for 1ms to allow PLL lock
         #RESET_HOLD_NS;
         system_resetn = 1'b1;
 
-        $display("[%0t] Reset released after 10ms", $time);
+        $display("[%0t] Reset released after 1ms", $time);
     end
 
     //--------------------------------------------------------------------------
@@ -419,7 +406,7 @@ module vivado_tb;
         $display("  ECS Clock Period:    %0.3f ns (%.0f MHz)", ECS_CLK_PERIOD_NS, 1000.0/ECS_CLK_PERIOD_NS);
         $display("  AD9361 Clock Period: %0.3f ns (%.0f MHz)", AD9361_CLK_PERIOD_NS, 1000.0/AD9361_CLK_PERIOD_NS);
         $display("  COE Samples:         %0d", NUM_COE_SAMPLES);
-        $display("  Reset Period:        10ms");
+        $display("  Reset Period:        1ms");
         $display("==============================================");
 
         // Wait for simulation to complete or timeout

@@ -54,14 +54,16 @@ void axi_ad9361_adapter(
     valid_t      adc_enable_q1,
 
     // TX data to axi_ad9361
+    // Note: dac_valid_* and dac_enable_* are INPUTS from axi_ad9361
+    // The axi_ad9361 drives dac_valid to indicate "I want data now"
     iq_sample_t& dac_data_i0,
     iq_sample_t& dac_data_q0,
     iq_sample_t& dac_data_i1,
     iq_sample_t& dac_data_q1,
-    valid_t&     dac_valid_i0,
-    valid_t&     dac_valid_q0,
-    valid_t&     dac_valid_i1,
-    valid_t&     dac_valid_q1,
+    valid_t      dac_valid_i0,
+    valid_t      dac_valid_q0,
+    valid_t      dac_valid_i1,
+    valid_t      dac_valid_q1,
     valid_t      dac_enable_i0,
     valid_t      dac_enable_q0,
     valid_t      dac_enable_i1,
@@ -109,11 +111,14 @@ void axi_ad9361_adapter(
 #pragma HLS INTERFACE mode=ap_none port=adc_enable_i1
 #pragma HLS INTERFACE mode=ap_none port=adc_enable_q1
 
-    // TX outputs to axi_ad9361 - direct wire connections (no handshake)
+    // TX interface to axi_ad9361 - direct wire connections (no handshake)
+    // dac_data_* are OUTPUTS (we drive data to the DAC)
 #pragma HLS INTERFACE mode=ap_none port=dac_data_i0
 #pragma HLS INTERFACE mode=ap_none port=dac_data_q0
 #pragma HLS INTERFACE mode=ap_none port=dac_data_i1
 #pragma HLS INTERFACE mode=ap_none port=dac_data_q1
+    // dac_valid_* and dac_enable_* are INPUTS from axi_ad9361
+    // axi_ad9361 asserts dac_valid when it wants new data
 #pragma HLS INTERFACE mode=ap_none port=dac_valid_i0
 #pragma HLS INTERFACE mode=ap_none port=dac_valid_q0
 #pragma HLS INTERFACE mode=ap_none port=dac_valid_i1
@@ -249,40 +254,44 @@ void axi_ad9361_adapter(
     local_rx_status[StatusBits::RX_OVERFLOW] = rx_overflow_sticky;
 
     //==========================================================================
-    // TX Data Generation - Continuous Cycling
+    // TX Data Generation - Driven by dac_valid from axi_ad9361
     //==========================================================================
+    // The axi_ad9361 asserts dac_valid_* to request new data.
+    // We respond by providing data on dac_data_* and advancing the BRAM pointer.
 
     iq_sample_t tx_i0, tx_q0, tx_i1, tx_q1;
-    bool tx_valid_out = false;
 
-    if (loopback_enable) {
+    // Determine if axi_ad9361 is requesting data (any dac_valid asserted)
+    bool dac_requesting = dac_valid_i0 || dac_valid_q0 || dac_valid_i1 || dac_valid_q1;
+
+    // TX is active when enabled and DAC is requesting data
+    bool tx_active = tx_enable && dac_requesting;
+
+    if (loopback_enable && dac_requesting) {
         // Internal loopback: RX -> TX
         tx_i0 = rx_i0;
         tx_q0 = rx_q0;
         tx_i1 = rx_i1;
         tx_q1 = rx_q1;
-        tx_valid_out = rx_valid;
-    } else if (tx_enable) {
-        // Continuous cycling through TX BRAM
+    } else if (tx_active) {
+        // Read from TX BRAM when DAC requests data
         iq_pair_t tx_sample = tx_bram[tx_read_ptr];
         tx_i0 = tx_sample.range(15, 0);
         tx_q0 = tx_sample.range(31, 16);
         tx_i1 = 0;  // Only using channel 0 for TX BRAM playback
         tx_q1 = 0;
 
-        // Advance pointer (wraps around)
+        // Advance pointer only when DAC actually requests data (wraps around)
         tx_read_ptr++;
         if (tx_read_ptr >= IPInfo::BRAM_DEPTH) {
             tx_read_ptr = 0;
         }
-        tx_valid_out = true;
     } else {
-        // Disabled - output zeros
+        // Disabled or DAC not requesting - output zeros
         tx_i0 = 0;
         tx_q0 = 0;
         tx_i1 = 0;
         tx_q1 = 0;
-        tx_valid_out = false;
     }
 
     // Clear underflow if requested
@@ -291,17 +300,13 @@ void axi_ad9361_adapter(
         tx_underflow_sticky = false;
     }
 
-    // Drive TX outputs
+    // Drive TX data outputs (gate with channel enables)
     dac_data_i0 = tx_ch0_en ? tx_i0 : iq_sample_t(0);
     dac_data_q0 = tx_ch1_en ? tx_q0 : iq_sample_t(0);
     dac_data_i1 = tx_ch2_en ? tx_i1 : iq_sample_t(0);
     dac_data_q1 = tx_ch3_en ? tx_q1 : iq_sample_t(0);
 
-    // TX valid signals
-    dac_valid_i0 = tx_ch0_en && tx_valid_out;
-    dac_valid_q0 = tx_ch1_en && tx_valid_out;
-    dac_valid_i1 = tx_ch2_en && tx_valid_out;
-    dac_valid_q1 = tx_ch3_en && tx_valid_out;
+    // Note: dac_valid_* are INPUTS from axi_ad9361, not outputs from us
 
     // Build TX status
     local_tx_status[StatusBits::TX_READY] = tx_enable;
@@ -316,7 +321,7 @@ void axi_ad9361_adapter(
 
     local_status[StatusBits::ENABLED] = global_enable;
     local_status[StatusBits::RX_ACTIVE] = rx_enable && rx_valid;
-    local_status[StatusBits::TX_ACTIVE] = tx_enable && tx_valid_out;
+    local_status[StatusBits::TX_ACTIVE] = tx_active;
     local_status[StatusBits::LOOPBACK_ON] = loopback_enable;
     local_status[StatusBits::RX_FULL] = rx_buffer_full;
 
