@@ -85,7 +85,17 @@
 # Get the directory where this script is located
 set script_dir [file dirname [info script]]
 set project_dir [file normalize "$script_dir/.."]
-set vivado_dir "C:/Xilinx/2025.2/Vivado"
+
+# Auto-detect Vivado installation directory from the running Vivado instance
+# This works because Vivado sets XILINX_VIVADO when it runs, and we can also
+# derive it from the executable path
+if {[info exists ::env(XILINX_VIVADO)]} {
+    set vivado_dir $::env(XILINX_VIVADO)
+} else {
+    # Fallback: extract from Vivado executable path (e.g., /opt/Xilinx/2025.2/Vivado/bin/vivado -> /opt/Xilinx/2025.2/Vivado)
+    set vivado_dir [file dirname [file dirname [info nameofexecutable]]]
+}
+puts "Vivado directory: $vivado_dir"
 
 puts "Script directory: $script_dir"
 puts "Project directory: $project_dir"
@@ -258,6 +268,35 @@ set_property top_lib xil_defaultlib [get_filesets sim_bram_tb]
 
 # Set simulation runtime (longer for AXI transactions)
 set_property -name {xsim.simulate.runtime} -value {1000us} -objects [get_filesets sim_bram_tb]
+
+# ==============================================================================
+# Add SmartConnect SystemC Simulation Libraries
+# ==============================================================================
+# SmartConnect uses SystemC-based TLM models. These require the pre-compiled
+# simulation libraries from the Vivado installation.
+# ==============================================================================
+
+puts "Configuring SmartConnect simulation libraries..."
+
+# Add all required SmartConnect simulation libraries to xelab
+# These are the SystemC-based modules that implement the SmartConnect functionality
+set sc_libs [list \
+    "-L smartconnect_v1_0" \
+    "-L axi_infrastructure_v1_1_0" \
+    "-L sc_node_v1_0_19" \
+    "-L sc_mmu_v1_0_16" \
+    "-L sc_axi2sc_v1_0_11" \
+    "-L sc_sc2axi_v1_0_11" \
+    "-L sc_exit_v1_0_18" \
+    "-L sc_si_converter_v1_0_16" \
+    "-L sc_transaction_regulator_v1_0_12" \
+    "-L sc_util_v1_0_6" \
+    "-L sc_switchboard_v1_0_8" \
+]
+
+set xelab_opts [join $sc_libs " "]
+puts "Adding xelab libraries: $xelab_opts"
+set_property -name {xsim.elaborate.xelab.more_options} -value $xelab_opts -objects [get_filesets sim_bram_tb]
 
 # Make sim_bram_tb the active simulation set
 puts "Setting active simulation fileset to sim_bram_tb..."
