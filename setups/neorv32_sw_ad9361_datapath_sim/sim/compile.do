@@ -14,21 +14,29 @@ set sim_dir [pwd]
 set vivado_questa_dir "$sim_dir/../NEORV32_Simulation.ip_user_files/sim_scripts/questa"
 
 # ================================================================================
-# Pre-compiled Xilinx Simulation Libraries (from compile_simlib)
+# Required Environment Variables
 # ================================================================================
-# These libraries are pre-compiled using Vivado's compile_simlib command:
-#   compile_simlib -simulator questa -simulator_exec_path {path_to_questa} ...
+# XILINX_VIVADO:      Path to Vivado installation (for glbl.v)
+#   Windows: set XILINX_VIVADO=C:\Xilinx\Vivado\2024.2
+#   Linux:   export XILINX_VIVADO=/opt/Xilinx/Vivado/2024.2
 #
-# Set the XILINX_QUESTA_LIBS environment variable to point to your libraries:
+# XILINX_QUESTA_LIBS: Path to pre-compiled Xilinx simulation libraries
 #   Windows: set XILINX_QUESTA_LIBS=C:\Work\Questa_Libraries_Vivado
 #   Linux:   export XILINX_QUESTA_LIBS=/path/to/Questa_Libraries_Vivado
+#
+# To compile Xilinx libraries, run in Vivado Tcl Console:
+#   compile_simlib -simulator questa -simulator_exec_path {path_to_questa} ...
 # ================================================================================
 
-if {[info exists ::env(XILINX_QUESTA_LIBS)]} {
-    set XILINX_QUESTA_LIBS $::env(XILINX_QUESTA_LIBS)
-} else {
+if {![info exists ::env(XILINX_VIVADO)]} {
+    error "XILINX_VIVADO environment variable not set.\n  Set it to point to your Vivado installation.\n  Windows: set XILINX_VIVADO=C:\\Xilinx\\Vivado\\2024.2\n  Linux:   export XILINX_VIVADO=/opt/Xilinx/Vivado/2024.2"
+}
+set XILINX_VIVADO $::env(XILINX_VIVADO)
+
+if {![info exists ::env(XILINX_QUESTA_LIBS)]} {
     error "XILINX_QUESTA_LIBS environment variable not set.\n  Set it to point to your pre-compiled Xilinx simulation libraries.\n  Windows: set XILINX_QUESTA_LIBS=C:\\Work\\Questa_Libraries_Vivado\n  Linux:   export XILINX_QUESTA_LIBS=/path/to/Questa_Libraries_Vivado"
 }
+set XILINX_QUESTA_LIBS $::env(XILINX_QUESTA_LIBS)
 
 # ================================================================================
 # Validate pre-compiled libraries exist
