@@ -32,10 +32,12 @@ USER_FLAGS += -Wl,--defsym,__neorv32_ram_size=16k
 # Set path to NEORV32 root directory
 NEORV32_HOME ?= ../..
 
-# Windows compatibility: override SET command (Unix 'set -e' not available)
-ifeq ($(OS),Windows_NT)
-SET = echo
-endif
-
 # Include the main NEORV32 makefile
 include $(NEORV32_HOME)/sw/common/common.mk
+
+# Windows compatibility: override Unix commands not available on Windows CMD.
+# Must come after the include so common.mk doesn't overwrite these.
+ifeq ($(OS),Windows_NT)
+SET   = echo
+MKDIR = mkdir
+endif

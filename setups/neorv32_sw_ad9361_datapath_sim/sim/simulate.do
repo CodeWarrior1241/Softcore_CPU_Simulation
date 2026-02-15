@@ -43,6 +43,7 @@ vmap blk_mem_gen_v8_4_12 $vivado_questa_dir/questa_lib/msim/blk_mem_gen_v8_4_12
 vmap xlslice_v1_0_5 $vivado_questa_dir/questa_lib/msim/xlslice_v1_0_5
 vmap xlconcat_v2_1_7 $vivado_questa_dir/questa_lib/msim/xlconcat_v2_1_7
 vmap util_reduced_logic_v2_0_7 $vivado_questa_dir/questa_lib/msim/util_reduced_logic_v2_0_7
+vmap xlconstant_v1_1_10 $vivado_questa_dir/questa_lib/msim/xlconstant_v1_1_10
 
 # ================================================================================
 # Elaborate and Load Design
@@ -73,6 +74,7 @@ vopt -l elaborate.log +acc=npr -suppress 10016 \
     -L xlslice_v1_0_5 \
     -L xlconcat_v2_1_7 \
     -L util_reduced_logic_v2_0_7 \
+    -L xlconstant_v1_1_10 \
     -L unisims_ver \
     -L unimacro_ver \
     -L secureip \

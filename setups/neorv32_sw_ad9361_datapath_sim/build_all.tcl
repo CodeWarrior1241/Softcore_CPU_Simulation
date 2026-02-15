@@ -170,6 +170,44 @@ update_compile_order -fileset $synth_sources_name
 # Path to NEORV32 sources (repository root, two levels up from setups/vivado/)
 set neorv32_home [file normalize "$project_dir/../.."]
 
+###############################################################################
+# Install NEORV32 Software Image (ad9361_loopback)
+###############################################################################
+# Copy the pre-built ad9361_loopback application image into rtl/core/
+# so that IP packaging picks up the correct program.
+# If the pre-built image is missing, fall back to compiling from source.
+
+set sw_app_dir  "$neorv32_home/sw/ad9361_loopback"
+set prebuilt    "$sw_app_dir/neorv32_application_image.vhd"
+set app_image   "$neorv32_home/rtl/core/neorv32_application_image.vhd"
+
+if {[file exists $prebuilt]} {
+    puts "INFO: Installing pre-built ad9361_loopback image..."
+    file copy -force $prebuilt $app_image
+    puts "INFO: $prebuilt → $app_image"
+} else {
+    # No pre-built image — compile from source (requires RISC-V GCC in PATH)
+    if {![file exists "$sw_app_dir/main.c"]} {
+        puts "ERROR: ad9361_loopback source not found: $sw_app_dir/main.c"
+        return -1
+    }
+    puts "INFO: Pre-built image not found, compiling ad9361_loopback from source..."
+    if {[catch {exec make -C $sw_app_dir clean_all image install 2>@1} build_log]} {
+        puts $build_log
+        puts ""
+        puts "ERROR: Failed to build ad9361_loopback application."
+        puts "  Ensure the RISC-V GCC toolchain is in your PATH:"
+        puts "    riscv-none-elf-gcc --version"
+        return -1
+    }
+    puts $build_log
+}
+
+if {![file exists $app_image]} {
+    puts "ERROR: Application image not found: $app_image"
+    return -1
+}
+
 # Package NEORV32 as Vivado IP (using existing script)
 # Note: neorv32_vivado_ip.tcl creates its own project, packages the IP, then closes it
 puts "INFO: Packaging NEORV32 as Vivado IP..."

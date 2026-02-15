@@ -10,7 +10,7 @@ setlocal enabledelayedexpansion
 REM Configuration
 set VSIM="C:\Program Files\Mentor_Graphics\Questa_Prime_2025.1\win64\vsim.exe"
 set SIM_MODE=gui
-set SIM_TIME=10ms
+set SIM_TIME=450ms
 
 REM Change to script directory
 cd /d "%~dp0"

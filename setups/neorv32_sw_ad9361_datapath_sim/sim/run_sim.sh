@@ -10,7 +10,7 @@ set -e
 # Configuration
 VSIM="${VSIM:-vsim}"
 SIM_MODE="gui"
-SIM_TIME="10ms"
+SIM_TIME="450ms"
 
 # Change to script directory
 cd "$(dirname "$0")"
