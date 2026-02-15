@@ -183,8 +183,9 @@ source $neorv32_home/rtl/system_integration/neorv32_vivado_ip.tcl
 # AXI AD9361 Adapter HLS IP
 ###############################################################################
 
-# Use pre-built HLS IP from the impl/ip directory
-set hls_ip_dir "$project_dir/src/axiad9361_adapter/axiad9361_adapter/hls/impl/ip"
+# Use pre-built HLS IP from the project-level src directory
+# Navigate up 4 levels: neorv32_sw_ad9361_datapath_sim -> setups -> neorv32 -> deps -> project root
+set hls_ip_dir [file normalize "$project_dir/../../../../src/axiad9361_adapter/axiad9361_adapter/hls/impl/ip"]
 
 if {![file exists $hls_ip_dir]} {
     puts "ERROR: HLS IP directory not found: $hls_ip_dir"
