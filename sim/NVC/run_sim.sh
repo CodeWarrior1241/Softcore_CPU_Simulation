@@ -105,13 +105,13 @@ $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_c
 $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_hwtrig.vhd
 $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_counters.vhd
 $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_regfile.vhd
-$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_cp_shifter.vhd
-$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_cp_muldiv.vhd
-$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_cp_bitmanip.vhd
-$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_cp_fpu.vhd
-$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_cp_cfu.vhd
-$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_cp_cond.vhd
-$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_cp_crypto.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_alu_shifter.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_alu_muldiv.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_alu_bitmanip.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_alu_fpu.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_alu_cfu.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_alu_cond.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_alu_crypto.vhd
 $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_alu.vhd
 $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_lsu.vhd
 $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu_pmp.vhd
@@ -120,16 +120,21 @@ $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cpu.v
 
 # Cache and Bus
 $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cache.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cache_ram.vhd
 $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_bus.vhd
 $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_dma.vhd
 
 # Memory
-$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_application_image.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_imem_image.vhd
 $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_imem.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_imem_ram.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_imem_rom.vhd
 $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_dmem.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_dmem_ram.vhd
 $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_xbus.vhd
-$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_bootloader_image.vhd
-$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_boot_rom.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_bootrom_image.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_bootrom.vhd
+$NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_bootrom_rom.vhd
 
 # Peripherals
 $NVC --std=2008 --work=neorv32:$WORK_DIR/neorv32 -a ../../rtl/core/neorv32_cfs.vhd

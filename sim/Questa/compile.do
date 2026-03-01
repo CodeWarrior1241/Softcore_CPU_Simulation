@@ -48,13 +48,13 @@ vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_control.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_hwtrig.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_counters.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_regfile.vhd
-vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_cp_shifter.vhd
-vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_cp_muldiv.vhd
-vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_cp_bitmanip.vhd
-vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_cp_fpu.vhd
-vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_cp_cfu.vhd
-vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_cp_cond.vhd
-vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_cp_crypto.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_alu_shifter.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_alu_muldiv.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_alu_bitmanip.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_alu_fpu.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_alu_cfu.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_alu_cond.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_alu_crypto.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_alu.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_lsu.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu_pmp.vhd
@@ -63,16 +63,21 @@ vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cpu.vhd
 
 # Cache and Bus
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cache.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cache_ram.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_bus.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_dma.vhd
 
 # Memory
-vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_application_image.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_imem_image.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_imem.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_imem_ram.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_imem_rom.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_dmem.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_dmem_ram.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_xbus.vhd
-vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_bootloader_image.vhd
-vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_boot_rom.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_bootrom_image.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_bootrom.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_bootrom_rom.vhd
 
 # Peripherals
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_cfs.vhd

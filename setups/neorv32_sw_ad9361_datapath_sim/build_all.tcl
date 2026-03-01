@@ -178,8 +178,8 @@ set neorv32_home [file normalize "$project_dir/../.."]
 # If the pre-built image is missing, fall back to compiling from source.
 
 set sw_app_dir  "$neorv32_home/sw/ad9361_loopback"
-set prebuilt    "$sw_app_dir/neorv32_application_image.vhd"
-set app_image   "$neorv32_home/rtl/core/neorv32_application_image.vhd"
+set prebuilt    "$sw_app_dir/neorv32_imem_image.vhd"
+set app_image   "$neorv32_home/rtl/core/neorv32_imem_image.vhd"
 
 if {[file exists $prebuilt]} {
     puts "INFO: Installing pre-built ad9361_loopback image..."
