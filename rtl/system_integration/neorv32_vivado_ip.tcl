@@ -6,7 +6,7 @@
 # -- -------------------------------------------------------------------------------- --
 # -- The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              --
 # -- Copyright (c) NEORV32 contributors.                                              --
-# -- Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  --
+# -- Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  --
 # -- Licensed under the BSD-3-Clause license, see LICENSE for details.                --
 # -- SPDX-License-Identifier: BSD-3-Clause                                            --
 # -- ================================================================================ --
@@ -66,7 +66,7 @@ update_compile_order -fileset sources_1
 # **************************************************************
 ipx::package_project -root_dir $outputdir/packaged_ip -vendor NEORV32 -library user -taxonomy /UserIP -import_files -set_current true -force
 set_property display_name "NEORV32" [ipx::current_core]
-set_property vendor_display_name "Stephan Nolting" [ipx::current_core]
+set_property vendor_display_name "neorv32" [ipx::current_core]
 set_property company_url https://github.com/stnolting/neorv32 [ipx::current_core]
 set_property description "The NEORV32 RISC-V Processor" [ipx::current_core]
 
@@ -137,7 +137,7 @@ proc setup_ip_gui {} {
   set_property enablement_dependency {$IO_CFS_EN}     [ipx::get_ports cfs_*            -of_objects [ipx::current_core]]
   set_property enablement_dependency {$IO_NEOLED_EN}  [ipx::get_ports neoled_o         -of_objects [ipx::current_core]]
   set_property enablement_dependency {$IO_CLINT_EN}   [ipx::get_ports mtime_time_o     -of_objects [ipx::current_core]]
-  set_property enablement_dependency {!$IO_CLINT_EN}  [ipx::get_ports irw_mti_i        -of_objects [ipx::current_core]]
+  set_property enablement_dependency {!$IO_CLINT_EN}  [ipx::get_ports irq_mti_i        -of_objects [ipx::current_core]]
   set_property enablement_dependency {!$IO_CLINT_EN}  [ipx::get_ports irq_msi_i        -of_objects [ipx::current_core]]
 
 
@@ -289,7 +289,7 @@ proc setup_ip_gui {} {
     { RISCV_ISA_Zibi   {Zibi - Branch with immediate-comparison}            {} }
     { RISCV_ISA_Zicond {Zicond - Conditional-move instructions}             {} }
     { RISCV_ISA_Zimop  {Zimop - May-be-operation}                           {} }
-    { RISCV_ISA_Zxcfu  {Zxcfu - Custom-instructions unit (user-defined)}    {} }
+    { RISCV_ISA_Xcfu   {Xcfu - Custom-instructions unit (user-defined)}     {} }
   }
 
   set group [add_group $page {Physical Memory Protection (PMP)}]
@@ -317,9 +317,9 @@ proc setup_ip_gui {} {
   # GUI Page: Memory
   # **************************************************************
   set page [add_page {Memory}]
-  set mem_note "The memory sizes need to be exported to the linker via dedicated symbols. Example:"
-  set imem_note "IMEM size (32kB): -Wl,--defsym,__neorv32_rom_size=32k"
-  set dmem_note "DMEM size (16kB): -Wl,--defsym,__neorv32_ram_size=16k"
+  set mem_note "The memory sizes & address need to be exported to the linker via dedicated symbols. Example:"
+  set imem_note "IMEM 32kB @ 0x00000000: -Wl,--defsym,__neorv32_rom_size=32k -Wl,--defsym,__neorv32_rom_base=0x00000000"
+  set dmem_note "DMEM 16kB @ 0x80000000: -Wl,--defsym,__neorv32_ram_size=16k -Wl,--defsym,__neorv32_ram_base=0x80000000"
   ipgui::add_static_text -name {MEM note}  -component [ipx::current_core] -parent [ipgui::get_pagespec -name "Memory" -component [ipx::current_core] ] -text $mem_note
   ipgui::add_static_text -name {IMEM note} -component [ipx::current_core] -parent [ipgui::get_pagespec -name "Memory" -component [ipx::current_core] ] -text $imem_note
   ipgui::add_static_text -name {DMEM note} -component [ipx::current_core] -parent [ipgui::get_pagespec -name "Memory" -component [ipx::current_core] ] -text $dmem_note
@@ -327,6 +327,7 @@ proc setup_ip_gui {} {
   set group [add_group $page {Internal Instruction Memory (IMEM)}]
   add_params $group {
     { IMEM_EN        {Enable internal IMEM} }
+    { IMEM_BASE      {IMEM base address}     {Naturally-aligned to its size; use with care!}     {$IMEM_EN} }
     { IMEM_SIZE      {IMEM size (bytes)}     {Use a power of two}                                {$IMEM_EN} }
     { IMEM_OUTREG_EN {Output register stage} {Improves mapping/timing at the expense of latency} {$IMEM_EN} }
   }
@@ -334,6 +335,7 @@ proc setup_ip_gui {} {
   set group [add_group $page {Internal Data Memory (DMEM)}]
   add_params $group {
     { DMEM_EN        {Enable internal DMEM} }
+    { DMEM_BASE      {DMEM base address}     {Naturally-aligned to its size; use with care!}     {$DMEM_EN} }
     { DMEM_SIZE      {DMEM size (bytes)}     {Use a power of two}                                {$DMEM_EN} }
     { DMEM_OUTREG_EN {Output register stage} {Improves mapping/timing at the expense of latency} {$DMEM_EN} }
   }

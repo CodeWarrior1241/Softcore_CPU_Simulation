@@ -29,7 +29,7 @@ entity neorv32_tb is
     RISCV_ISA_U       : boolean                        := true;        -- user mode extension
     RISCV_ISA_Zaamo   : boolean                        := true;        -- atomic read-modify-write operations extension
     RISCV_ISA_Zalrsc  : boolean                        := true;        -- atomic reservation-set operations extension
-    RISCV_ISA_Zcb     : boolean                        := false;       -- additional code size reduction instructions
+    RISCV_ISA_Zcb     : boolean                        := true;        -- additional code size reduction instructions
     RISCV_ISA_Zba     : boolean                        := true;        -- shifted-add bit-manipulation extension
     RISCV_ISA_Zbb     : boolean                        := true;        -- basic bit-manipulation extension
     RISCV_ISA_Zbkb    : boolean                        := true;        -- bit-manipulation instructions for cryptography
@@ -48,19 +48,21 @@ entity neorv32_tb is
     RISCV_ISA_Zksed   : boolean                        := true;        -- ShangMi block cipher extension
     RISCV_ISA_Zksh    : boolean                        := true;        -- ShangMi hash extension
     RISCV_ISA_Zmmul   : boolean                        := true;        -- multiply-only M sub-extension
-    RISCV_ISA_Zxcfu   : boolean                        := true;        -- custom (instr.) functions unit
+    RISCV_ISA_Xcfu    : boolean                        := true;        -- custom (instr.) functions unit
     CPU_CONSTT_BR_EN  : boolean                        := false;       -- constant-time branches
     CPU_FAST_MUL_EN   : boolean                        := true;        -- use DSPs for M extension's multiplier
     CPU_FAST_SHIFT_EN : boolean                        := true;        -- use barrel shifter for shift operations
     IMEM_EN           : boolean                        := true;        -- implement processor-internal instruction memory
+    IMEM_BASE         : std_ulogic_vector(31 downto 0) := x"00000000"; -- base address of processor-internal instruction memory (naturally aligned)
     IMEM_SIZE         : natural                        := 32*1024;     -- size of processor-internal instruction memory in bytes (use a power of 2)
     DMEM_EN           : boolean                        := true;        -- implement processor-internal data memory
+    DMEM_BASE         : std_ulogic_vector(31 downto 0) := x"80000000"; -- base address of processor-internal data memory (naturally aligned)
     DMEM_SIZE         : natural                        := 8*1024;      -- size of processor-internal data memory in bytes (use a power of 2)
     ICACHE_EN         : boolean                        := true;        -- implement instruction cache
-    ICACHE_NUM_BLOCKS : natural range 1 to 4096        := 64;          -- i-cache: number of blocks (min 1), has to be a power of 2
+    ICACHE_NUM_BLOCKS : natural range 1 to 4096        := 64;          -- i-cache: number of blocks, has to be a power of 2
     DCACHE_EN         : boolean                        := true;        -- implement data cache
-    DCACHE_NUM_BLOCKS : natural range 1 to 4096        := 32;          -- d-cache: number of blocks (min 1), has to be a power of 2
-    CACHE_BLOCK_SIZE  : natural range 8 to 1024        := 32;          -- i-cache/d-cache: block size in bytes (min 8), has to be a power of 2
+    DCACHE_NUM_BLOCKS : natural range 1 to 4096        := 32;          -- d-cache: number of blocks, has to be a power of 2
+    CACHE_BLOCK_SIZE  : natural range 4 to 1024        := 32;          -- i-cache/d-cache: block size in bytes, has to be a power of 2
     CACHE_BURSTS_EN   : boolean                        := true;        -- enable issuing of burst transfer for cache update
     TRACE_LOG_EN      : boolean                        := true;        -- write full trace log to file
     -- external memory A --
@@ -171,7 +173,8 @@ begin
     RISCV_ISA_Zksed     => RISCV_ISA_Zksed,
     RISCV_ISA_Zksh      => RISCV_ISA_Zksh,
     RISCV_ISA_Zmmul     => RISCV_ISA_Zmmul,
-    RISCV_ISA_Zxcfu     => RISCV_ISA_Zxcfu,
+    RISCV_ISA_Smcntrpmf => true,
+    RISCV_ISA_Xcfu      => RISCV_ISA_Xcfu,
     -- Extension Options --
     CPU_CONSTT_BR_EN    => CPU_CONSTT_BR_EN,
     CPU_FAST_MUL_EN     => CPU_FAST_MUL_EN,
@@ -186,10 +189,12 @@ begin
     HPM_CNT_WIDTH       => 40,
     -- Internal Instruction memory --
     IMEM_EN             => IMEM_EN,
+    IMEM_BASE           => IMEM_BASE,
     IMEM_SIZE           => IMEM_SIZE,
-    IMEM_OUTREG_EN      => true,
+    IMEM_OUTREG_EN      => false,
     -- Internal Data memory --
     DMEM_EN             => DMEM_EN,
+    DMEM_BASE           => DMEM_BASE,
     DMEM_SIZE           => DMEM_SIZE,
     DMEM_OUTREG_EN      => true,
     -- CPU Caches --
@@ -324,7 +329,7 @@ begin
     mtime_time_o   => open,
     -- CPU Interrupts --
     irq_msi_i      => msi,
-    irw_mti_i      => mti,
+    irq_mti_i      => mti,
     irq_mei_i      => mei
   );
 
@@ -648,6 +653,7 @@ begin
     mem_req_i => xbus_fmem_data_req,
     mem_rsp_o => xbus_fmem_data_rsp
   );
+
 
 
   -- XBUS: IQ Sample BRAM (simulates ADC capture buffer) ------------------------------------

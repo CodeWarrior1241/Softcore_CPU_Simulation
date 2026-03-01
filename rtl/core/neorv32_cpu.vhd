@@ -52,11 +52,11 @@ entity neorv32_cpu is
     RISCV_ISA_Zksed     : boolean;                        -- ShangMi hash extension
     RISCV_ISA_Zksh      : boolean;                        -- ShangMi block cipher extension
     RISCV_ISA_Zmmul     : boolean;                        -- multiply-only M sub-extension
-    RISCV_ISA_Zxcfu     : boolean;                        -- custom (instr.) functions unit
     RISCV_ISA_Sdext     : boolean;                        -- external debug mode extension
     RISCV_ISA_Sdtrig    : boolean;                        -- trigger module extension
     RISCV_ISA_Smcntrpmf : boolean;                        -- counter privilege-mode filtering
     RISCV_ISA_Smpmp     : boolean;                        -- physical memory protection
+    RISCV_ISA_Xcfu      : boolean;                        -- custom (instr.) functions unit
     -- Tuning Options --
     CPU_TRACE_EN        : boolean;                        -- enable CPU execution trace generator
     CPU_CONSTT_BR_EN    : boolean;                        -- constant-time branches
@@ -99,7 +99,7 @@ end neorv32_cpu;
 architecture neorv32_cpu_rtl of neorv32_cpu is
 
   -- auto-configuration --
-  constant rf_awidth_c : natural := cond_sel_natural_f(RISCV_ISA_E, 4, 5); -- register file address width
+  constant rf_awidth_c : natural := sel_natural_f(RISCV_ISA_E, 4, 5); -- register file address width
   constant any_amo_c   : boolean := RISCV_ISA_Zaamo or RISCV_ISA_Zalrsc; -- any AMO extension available
   constant riscv_a_c   : boolean := RISCV_ISA_Zaamo and RISCV_ISA_Zalrsc; -- A: atomic memory operations
   constant riscv_b_c   : boolean := RISCV_ISA_Zba and RISCV_ISA_Zbb and RISCV_ISA_Zbs; -- B: bit manipulation
@@ -110,9 +110,12 @@ architecture neorv32_cpu_rtl of neorv32_cpu is
   constant riscv_zks_c : boolean := RISCV_ISA_Zbkb and RISCV_ISA_Zbkc and RISCV_ISA_Zbkx and
                                     RISCV_ISA_Zksh and RISCV_ISA_Zksed; -- Zks: ShangMi suite
 
-  -- local signals --
-  signal ctrl        : ctrl_bus_t;                     -- main control bus
-  signal frontend    : if_bus_t;                       -- instruction-fetch interface
+  -- busses --
+  signal ctrl     : ctrl_bus_t; -- main control bus
+  signal frontend : if_bus_t;   -- front-end to back-end interface
+  signal dbus_req : bus_req_t;  -- intermediate data memory request
+
+  -- wiring --
   signal if_pmp_addr : std_ulogic_vector(31 downto 0); -- instruction fetch access address
   signal if_pmp_priv : std_ulogic;                     -- instruction fetch access privilege level
   signal if_pmp_err  : std_ulogic;                     -- instruction fetch PMP access fault
@@ -129,7 +132,6 @@ architecture neorv32_cpu_rtl of neorv32_cpu is
   signal lsu_mar     : std_ulogic_vector(31 downto 0); -- LSU memory address register
   signal lsu_err     : std_ulogic_vector(3 downto 0);  -- LSU alignment/access errors
   signal lsu_wait    : std_ulogic;                     -- wait for current data bus access
-  signal dbus_req    : bus_req_t;                      -- data bus request
   signal csr_rdata   : std_ulogic_vector(31 downto 0); -- CSR read data
   signal irq_machine : std_ulogic_vector(2 downto 0);  -- RISC-V standard machine-level interrupts
 
@@ -145,58 +147,62 @@ begin
 
     -- CPU ISA configuration (in alphabetical order - not in canonical order) --
     assert false report "[NEORV32] CPU ISA: rv32" &
-      cond_sel_string_f(RISCV_ISA_E,         "e",          "i") &
-      cond_sel_string_f(riscv_a_c,           "a",          "" ) &
-      cond_sel_string_f(riscv_b_c,           "b",          "" ) &
-      cond_sel_string_f(RISCV_ISA_C,         "c",          "" ) &
-      cond_sel_string_f(RISCV_ISA_M,         "m",          "" ) &
-      cond_sel_string_f(RISCV_ISA_U,         "u",          "" ) &
-      cond_sel_string_f(true,                "x",          "" ) & -- always enabled
-      cond_sel_string_f(RISCV_ISA_Zaamo,     "_zaamo",     "" ) &
-      cond_sel_string_f(RISCV_ISA_Zalrsc,    "_zalrsc",    "" ) &
-      cond_sel_string_f(RISCV_ISA_Zba,       "_zba",       "" ) &
-      cond_sel_string_f(RISCV_ISA_Zbb,       "_zbb",       "" ) &
-      cond_sel_string_f(RISCV_ISA_Zbkb,      "_zbkb",      "" ) &
-      cond_sel_string_f(RISCV_ISA_Zbkc,      "_zbkc",      "" ) &
-      cond_sel_string_f(RISCV_ISA_Zbkx,      "_zbkx",      "" ) &
-      cond_sel_string_f(RISCV_ISA_Zbs,       "_zbs",       "" ) &
-      cond_sel_string_f(RISCV_ISA_C,         "_zca",       "" ) &
-      cond_sel_string_f(riscv_zcb_c,         "_zcb",       "" ) &
-      cond_sel_string_f(RISCV_ISA_Zfinx,     "_zfinx",     "" ) &
-      cond_sel_string_f(RISCV_ISA_Zibi,      "_zibi",      "" ) &
-      cond_sel_string_f(RISCV_ISA_Zicntr,    "_zicntr",    "" ) &
-      cond_sel_string_f(RISCV_ISA_Zicond,    "_zicond",    "" ) &
-      cond_sel_string_f(true,                "_zicsr",     "" ) & -- always enabled
-      cond_sel_string_f(true,                "_zifencei",  "" ) & -- always enabled
-      cond_sel_string_f(RISCV_ISA_Zihpm,     "_zihpm",     "" ) &
-      cond_sel_string_f(RISCV_ISA_Zimop,     "_zimop",     "" ) &
-      cond_sel_string_f(riscv_zkn_c,         "_zkn",       "" ) &
-      cond_sel_string_f(RISCV_ISA_Zknd,      "_zknd",      "" ) &
-      cond_sel_string_f(RISCV_ISA_Zkne,      "_zkne",      "" ) &
-      cond_sel_string_f(RISCV_ISA_Zknh,      "_zknh",      "" ) &
-      cond_sel_string_f(riscv_zks_c,         "_zks",       "" ) &
-      cond_sel_string_f(RISCV_ISA_Zksed,     "_zksed",     "" ) &
-      cond_sel_string_f(RISCV_ISA_Zksh,      "_zksh",      "" ) &
-      cond_sel_string_f(riscv_zkt_c,         "_zkt",       "" ) &
-      cond_sel_string_f(RISCV_ISA_Zmmul,     "_zmmul",     "" ) &
-      cond_sel_string_f(RISCV_ISA_Zxcfu,     "_zxcfu",     "" ) &
-      cond_sel_string_f(RISCV_ISA_Sdext,     "_sdext",     "" ) &
-      cond_sel_string_f(RISCV_ISA_Sdtrig,    "_sdtrig",    "" ) &
-      cond_sel_string_f(RISCV_ISA_Smcntrpmf, "_smcntrpmf", "" ) &
-      cond_sel_string_f(RISCV_ISA_Smpmp,     "_smpmp",     "" )
+      sel_string_f(RISCV_ISA_E,         "e",          "i") &
+      sel_string_f(riscv_a_c,           "a",          "" ) &
+      sel_string_f(riscv_b_c,           "b",          "" ) &
+      sel_string_f(RISCV_ISA_C,         "c",          "" ) &
+      sel_string_f(RISCV_ISA_M,         "m",          "" ) &
+      sel_string_f(RISCV_ISA_U,         "u",          "" ) &
+      sel_string_f(true,                "x",          "" ) & -- always enabled
+      sel_string_f(RISCV_ISA_Zaamo,     "_zaamo",     "" ) &
+      sel_string_f(RISCV_ISA_Zalrsc,    "_zalrsc",    "" ) &
+      sel_string_f(RISCV_ISA_Zba,       "_zba",       "" ) &
+      sel_string_f(RISCV_ISA_Zbb,       "_zbb",       "" ) &
+      sel_string_f(RISCV_ISA_Zbkb,      "_zbkb",      "" ) &
+      sel_string_f(RISCV_ISA_Zbkc,      "_zbkc",      "" ) &
+      sel_string_f(RISCV_ISA_Zbkx,      "_zbkx",      "" ) &
+      sel_string_f(RISCV_ISA_Zbs,       "_zbs",       "" ) &
+      sel_string_f(RISCV_ISA_C,         "_zca",       "" ) &
+      sel_string_f(riscv_zcb_c,         "_zcb",       "" ) &
+      sel_string_f(RISCV_ISA_Zfinx,     "_zfinx",     "" ) &
+      sel_string_f(RISCV_ISA_Zibi,      "_zibi",      "" ) &
+      sel_string_f(RISCV_ISA_Zicntr,    "_zicntr",    "" ) &
+      sel_string_f(RISCV_ISA_Zicond,    "_zicond",    "" ) &
+      sel_string_f(true,                "_zicsr",     "" ) & -- always enabled
+      sel_string_f(true,                "_zifencei",  "" ) & -- always enabled
+      sel_string_f(RISCV_ISA_Zihpm,     "_zihpm",     "" ) &
+      sel_string_f(RISCV_ISA_Zimop,     "_zimop",     "" ) &
+      sel_string_f(riscv_zkn_c,         "_zkn",       "" ) &
+      sel_string_f(RISCV_ISA_Zknd,      "_zknd",      "" ) &
+      sel_string_f(RISCV_ISA_Zkne,      "_zkne",      "" ) &
+      sel_string_f(RISCV_ISA_Zknh,      "_zknh",      "" ) &
+      sel_string_f(riscv_zks_c,         "_zks",       "" ) &
+      sel_string_f(RISCV_ISA_Zksed,     "_zksed",     "" ) &
+      sel_string_f(RISCV_ISA_Zksh,      "_zksh",      "" ) &
+      sel_string_f(riscv_zkt_c,         "_zkt",       "" ) &
+      sel_string_f(RISCV_ISA_Zmmul,     "_zmmul",     "" ) &
+      sel_string_f(RISCV_ISA_Sdext,     "_sdext",     "" ) &
+      sel_string_f(RISCV_ISA_Sdtrig,    "_sdtrig",    "" ) &
+      sel_string_f(RISCV_ISA_Smcntrpmf, "_smcntrpmf", "" ) &
+      sel_string_f(RISCV_ISA_Smpmp,     "_smpmp",     "" ) &
+      sel_string_f(RISCV_ISA_xcfu,      "_xcfu",      "" )
       severity note;
 
     -- CPU tuning options --
     assert false report "[NEORV32] CPU tuning options: " &
-      cond_sel_string_f(CPU_TRACE_EN,                 "trace ",              "") &
-      cond_sel_string_f(CPU_CONSTT_BR_EN,             "constt_br ",          "") &
-      cond_sel_string_f(CPU_FAST_MUL_EN,              "fast_mul ",           "") &
-      cond_sel_string_f(CPU_FAST_SHIFT_EN,            "fast_shift ",         "") &
-      cond_sel_string_f(boolean(CPU_RF_ARCH_SEL = 0), "rf_arch=sram_sync ",  "") &
-      cond_sel_string_f(boolean(CPU_RF_ARCH_SEL = 1), "rf_arch=sram_async ", "") &
-      cond_sel_string_f(boolean(CPU_RF_ARCH_SEL = 2), "rf_arch=reg",         "") &
-      cond_sel_string_f(boolean(CPU_RF_ARCH_SEL = 3), "rf_arch=latch ",      "")
+      sel_string_f(CPU_TRACE_EN,                 "trace ",              "") &
+      sel_string_f(CPU_CONSTT_BR_EN,             "constt_br ",          "") &
+      sel_string_f(CPU_FAST_MUL_EN,              "fast_mul ",           "") &
+      sel_string_f(CPU_FAST_SHIFT_EN,            "fast_shift ",         "") &
+      sel_string_f(boolean(CPU_RF_ARCH_SEL = 0), "rf_arch=sram_sync ",  "") &
+      sel_string_f(boolean(CPU_RF_ARCH_SEL = 1), "rf_arch=sram_async ", "") &
+      sel_string_f(boolean(CPU_RF_ARCH_SEL = 2), "rf_arch=reg",         "") &
+      sel_string_f(boolean(CPU_RF_ARCH_SEL = 3), "rf_arch=latch ",      "")
       severity note;
+
+    -- ISA configuration checks --
+    assert not (RISCV_ISA_Zcb and (not RISCV_ISA_C)) report
+      "[NEORV32] CPU ISA: Zcb requires C!" severity error;
 
   end generate;
 
@@ -267,11 +273,11 @@ begin
     RISCV_ISA_Zksh      => RISCV_ISA_Zksh,      -- ShangMi hash extension
     RISCV_ISA_Zkt       => riscv_zkt_c,         -- data-independent execution time for cryptography operations available
     RISCV_ISA_Zmmul     => RISCV_ISA_Zmmul,     -- multiply-only M sub-extension
-    RISCV_ISA_Zxcfu     => RISCV_ISA_Zxcfu,     -- custom (instr.) functions unit
     RISCV_ISA_Sdext     => RISCV_ISA_Sdext,     -- external debug mode extension
     RISCV_ISA_Sdtrig    => RISCV_ISA_Sdtrig,    -- trigger module extension
     RISCV_ISA_Smcntrpmf => RISCV_ISA_Smcntrpmf, -- counter privilege-mode filtering
     RISCV_ISA_Smpmp     => RISCV_ISA_Smpmp,     -- physical memory protection
+    RISCV_ISA_Xcfu      => RISCV_ISA_Xcfu,      -- custom (instr.) functions unit
     -- Tuning Options --
     CPU_CONSTT_BR_EN    => CPU_CONSTT_BR_EN     -- constant-time branches
   )
@@ -412,7 +418,7 @@ begin
     RISCV_ISA_Zksed  => RISCV_ISA_Zksed,  -- ShangMi block cipher extension
     RISCV_ISA_Zksh   => RISCV_ISA_Zksh,   -- ShangMi hash extension
     RISCV_ISA_Zmmul  => RISCV_ISA_Zmmul,  -- multiply-only M sub-extension
-    RISCV_ISA_Zxcfu  => RISCV_ISA_Zxcfu,  -- custom (instr.) functions unit
+    RISCV_ISA_Xcfu   => RISCV_ISA_Xcfu,   -- custom (instr.) functions unit
     -- Tuning Options --
     FAST_MUL_EN      => CPU_FAST_MUL_EN,  -- use DSPs for M extension's multiplier
     FAST_SHIFT_EN    => CPU_FAST_SHIFT_EN -- use barrel shifter for shift operations
@@ -447,7 +453,7 @@ begin
     clk_i       => clk_i,      -- global clock, rising edge
     rstn_i      => rstn_i,     -- global reset, low-active, async
     ctrl_i      => ctrl,       -- main control bus
-    -- cpu data access interface --
+    -- memory data access interface --
     addr_i      => alu_add,    -- access address
     wdata_i     => rs2,        -- write data
     rdata_o     => lsu_rdata,  -- read data

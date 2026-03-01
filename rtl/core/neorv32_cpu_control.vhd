@@ -54,11 +54,11 @@ entity neorv32_cpu_control is
     RISCV_ISA_Zksh      : boolean; -- ShangMi hash extension
     RISCV_ISA_Zkt       : boolean; -- data-independent execution time (for cryptography operations)
     RISCV_ISA_Zmmul     : boolean; -- multiply-only M sub-extension
-    RISCV_ISA_Zxcfu     : boolean; -- custom (instr.) functions unit
     RISCV_ISA_Sdext     : boolean; -- external debug mode extension
     RISCV_ISA_Sdtrig    : boolean; -- trigger module extension
     RISCV_ISA_Smcntrpmf : boolean; -- counter privilege-mode filtering
     RISCV_ISA_Smpmp     : boolean; -- physical memory protection
+    RISCV_ISA_Xcfu      : boolean; -- custom (instr.) functions unit
     -- Tuning Options --
     CPU_CONSTT_BR_EN    : boolean  -- constant-time branches
   );
@@ -229,9 +229,9 @@ begin
     trap.ecall        <= '0';
     trap.ebreak       <= '0';
     ctrl_nxt          <= ctrl_bus_zero_c; -- all zero/off by default (ALU operation = ZERO, ALU.adder_out = ADD)
-    ctrl_nxt.csr_addr <= ctrl.csr_addr;   -- keep previous CSR address
-    ctrl_nxt.lsu_rd   <= ctrl.lsu_rd; -- keep memory access read/write type
-    ctrl_nxt.lsu_wr   <= ctrl.lsu_wr;
+    ctrl_nxt.csr_addr <= ctrl.csr_addr; -- keep previous CSR address
+    ctrl_nxt.lsu_rd   <= ctrl.lsu_rd; -- keep memory read access type
+    ctrl_nxt.lsu_wr   <= ctrl.lsu_wr; -- keep memory write access type
 
     -- immediate --
     case opcode_v is
@@ -459,7 +459,7 @@ begin
               when others => exec_nxt.state <= S_DISPATCH; -- illegal or CSR operation
             end case;
           elsif (funct3_v /= funct3_zimop_c) and -- write to CSR if not may-be-operation
-                (((funct3_v = funct3_csrrw_c) or (funct3_v = funct3_csrrwi_c)) or (exec.ir(instr_rd_msb_c downto instr_rd_lsb_c) = "00000")) then
+                ((funct3_v = funct3_csrrw_c) or (funct3_v = funct3_csrrwi_c) or (exec.ir(instr_rs1_msb_c downto instr_rs1_lsb_c) /= "00000")) then
             ctrl_nxt.csr_we <= '1'; -- CSRRW[I]: always write CSR; CSRR[S/C][I]: write CSR if rs1/imm5 is NOT zero
           end if;
         end if;
@@ -774,71 +774,24 @@ begin
         trap.irq_buf(irq_firq_0_c+i) <= (trap.irq_pnd(irq_firq_0_c+i) and csr.mie_firq(i)) or (trap.env_pend and trap.irq_buf(irq_firq_0_c+i));
       end loop;
       -- exception buffer: accumulate exception requests; clear all requests at once when trap environment starts --
-      trap.exc_buf(exc_iaccess_c)  <= (trap.exc_buf(exc_iaccess_c)  or trap.instr_be)         and (not trap.env_enter);
-      trap.exc_buf(exc_illegal_c)  <= (trap.exc_buf(exc_illegal_c)  or trap.instr_il)         and (not trap.env_enter);
-      trap.exc_buf(exc_ialign_c)   <= (trap.exc_buf(exc_ialign_c)   or trap.instr_ma)         and (not trap.env_enter);
-      trap.exc_buf(exc_ecall_c)    <= (trap.exc_buf(exc_ecall_c)    or trap.ecall)            and (not trap.env_enter);
-      trap.exc_buf(exc_ebreak_c)   <= (trap.exc_buf(exc_ebreak_c)   or ebreak_trig)           and (not trap.env_enter);
-      trap.exc_buf(exc_salign_c)   <= (trap.exc_buf(exc_salign_c)   or lsu_err_i(2))          and (not trap.env_enter);
-      trap.exc_buf(exc_lalign_c)   <= (trap.exc_buf(exc_lalign_c)   or lsu_err_i(0))          and (not trap.env_enter);
-      trap.exc_buf(exc_saccess_c)  <= (trap.exc_buf(exc_saccess_c)  or lsu_err_i(3))          and (not trap.env_enter);
-      trap.exc_buf(exc_laccess_c)  <= (trap.exc_buf(exc_laccess_c)  or lsu_err_i(1))          and (not trap.env_enter);
-      trap.exc_buf(exc_db_break_c) <= (trap.exc_buf(exc_db_break_c) or debug_ctrl.trig_break) and (not trap.env_enter);
-      trap.exc_buf(exc_db_trig_c)  <= (trap.exc_buf(exc_db_trig_c)  or debug_ctrl.trig_hw)    and (not trap.env_enter);
-      trap.exc_buf(exc_db_step_c)  <= (trap.exc_buf(exc_db_step_c)  or debug_ctrl.trig_step)  and (not trap.env_enter);
+      trap.exc_buf(exc_iaccess_c) <= (trap.exc_buf(exc_iaccess_c) or trap.instr_be)         and (not trap.env_enter);
+      trap.exc_buf(exc_illegal_c) <= (trap.exc_buf(exc_illegal_c) or trap.instr_il)         and (not trap.env_enter);
+      trap.exc_buf(exc_ialign_c)  <= (trap.exc_buf(exc_ialign_c)  or trap.instr_ma)         and (not trap.env_enter);
+      trap.exc_buf(exc_ecall_c)   <= (trap.exc_buf(exc_ecall_c)   or trap.ecall)            and (not trap.env_enter);
+      trap.exc_buf(exc_ebreak_c)  <= (trap.exc_buf(exc_ebreak_c)  or ebreak_trig)           and (not trap.env_enter);
+      trap.exc_buf(exc_salign_c)  <= (trap.exc_buf(exc_salign_c)  or lsu_err_i(2))          and (not trap.env_enter);
+      trap.exc_buf(exc_lalign_c)  <= (trap.exc_buf(exc_lalign_c)  or lsu_err_i(0))          and (not trap.env_enter);
+      trap.exc_buf(exc_saccess_c) <= (trap.exc_buf(exc_saccess_c) or lsu_err_i(3))          and (not trap.env_enter);
+      trap.exc_buf(exc_laccess_c) <= (trap.exc_buf(exc_laccess_c) or lsu_err_i(1))          and (not trap.env_enter);
+      trap.exc_buf(exc_db_brkp_c) <= (trap.exc_buf(exc_db_brkp_c) or debug_ctrl.trig_break) and (not trap.env_enter);
+      trap.exc_buf(exc_db_trig_c) <= (trap.exc_buf(exc_db_trig_c) or debug_ctrl.trig_hw)    and (not trap.env_enter);
+      trap.exc_buf(exc_db_step_c) <= (trap.exc_buf(exc_db_step_c) or debug_ctrl.trig_step)  and (not trap.env_enter);
     end if;
   end process trap_buffer;
 
   -- environment break exception trigger --
   ebreak_trig <= (trap.ebreak and (    csr.prv_level) and (not csr.dcsr_ebreakm) and (not debug_ctrl.run)) or -- M-mode trap on M-ebreak
                  (trap.ebreak and (not csr.prv_level) and (not csr.dcsr_ebreaku) and (not debug_ctrl.run));   -- M-mode trap on U-ebreak
-
-
-  -- Trap Priority Encoder ------------------------------------------------------------------
-  -- -------------------------------------------------------------------------------------------
-  trap.cause <=
-    -- standard RISC-V synchronous exceptions --
-    trap_iaf_c      when (trap.exc_buf(exc_iaccess_c)  = '1') else -- instruction access fault
-    trap_iil_c      when (trap.exc_buf(exc_illegal_c)  = '1') else -- illegal instruction
-    trap_ima_c      when (trap.exc_buf(exc_ialign_c)   = '1') else -- instruction address misaligned
-    trap_env        when (trap.exc_buf(exc_ecall_c)    = '1') else -- environment call from U/M-mode
-    trap_brk_c      when (trap.exc_buf(exc_ebreak_c)   = '1') else -- environment breakpoint
-    trap_sma_c      when (trap.exc_buf(exc_salign_c)   = '1') else -- store address misaligned
-    trap_lma_c      when (trap.exc_buf(exc_lalign_c)   = '1') else -- load address misaligned
-    trap_saf_c      when (trap.exc_buf(exc_saccess_c)  = '1') else -- store access fault
-    trap_laf_c      when (trap.exc_buf(exc_laccess_c)  = '1') else -- load access fault
-    -- standard RISC-V debug mode synchronous exceptions and interrupts --
-    trap_db_halt_c  when (trap.irq_buf(irq_db_halt_c)  = '1') else -- external halt request
-    trap_db_trig_c  when (trap.exc_buf(exc_db_trig_c)  = '1') else -- hardware trigger
-    trap_db_break_c when (trap.exc_buf(exc_db_break_c) = '1') else -- breakpoint
-    trap_db_step_c  when (trap.exc_buf(exc_db_step_c)  = '1') else -- single stepping
-    -- NEORV32-specific fast interrupts --
-    trap_firq0_c    when (trap.irq_buf(irq_firq_0_c)   = '1') else -- fast interrupt channel 0
-    trap_firq1_c    when (trap.irq_buf(irq_firq_1_c)   = '1') else -- fast interrupt channel 1
-    trap_firq2_c    when (trap.irq_buf(irq_firq_2_c)   = '1') else -- fast interrupt channel 2
-    trap_firq3_c    when (trap.irq_buf(irq_firq_3_c)   = '1') else -- fast interrupt channel 3
-    trap_firq4_c    when (trap.irq_buf(irq_firq_4_c)   = '1') else -- fast interrupt channel 4
-    trap_firq5_c    when (trap.irq_buf(irq_firq_5_c)   = '1') else -- fast interrupt channel 5
-    trap_firq6_c    when (trap.irq_buf(irq_firq_6_c)   = '1') else -- fast interrupt channel 6
-    trap_firq7_c    when (trap.irq_buf(irq_firq_7_c)   = '1') else -- fast interrupt channel 7
-    trap_firq8_c    when (trap.irq_buf(irq_firq_8_c)   = '1') else -- fast interrupt channel 8
-    trap_firq9_c    when (trap.irq_buf(irq_firq_9_c)   = '1') else -- fast interrupt channel 9
-    trap_firq10_c   when (trap.irq_buf(irq_firq_10_c)  = '1') else -- fast interrupt channel 10
-    trap_firq11_c   when (trap.irq_buf(irq_firq_11_c)  = '1') else -- fast interrupt channel 11
-    trap_firq12_c   when (trap.irq_buf(irq_firq_12_c)  = '1') else -- fast interrupt channel 12
-    trap_firq13_c   when (trap.irq_buf(irq_firq_13_c)  = '1') else -- fast interrupt channel 13
-    trap_firq14_c   when (trap.irq_buf(irq_firq_14_c)  = '1') else -- fast interrupt channel 14
-    trap_firq15_c   when (trap.irq_buf(irq_firq_15_c)  = '1') else -- fast interrupt channel 15
-    -- standard RISC-V interrupts --
-    trap_mei_c      when (trap.irq_buf(irq_mei_irq_c)  = '1') else -- machine external interrupt (MEI)
-    trap_msi_c      when (trap.irq_buf(irq_msi_irq_c)  = '1') else -- machine software interrupt (MSI)
-    trap_mti_c;   --when (trap.irq_buf(irq_mti_irq_c)  = '1') else -- machine timer interrupt (MTI)
-
-  -- environment call helper --
-  trap_env <= trap_env_c(6 downto 2) & csr.prv_level & csr.prv_level;
-
-  -- exception program counter: async. interrupt or sync. exception? --
-  trap.pc <= exec.pc2 when (trap.cause(trap.cause'left) = '1') else exec.pc;
 
 
   -- Trap Triggers --------------------------------------------------------------------------
@@ -868,6 +821,53 @@ begin
 
   -- debug-entry halt interrupt? allow halt also after "reset" (#879) --
   trap.irq_fire(1) <= trap.irq_buf(irq_db_halt_c) when (exec.state = S_RESTART) or (exec.state = S_EXECUTE) or (exec.state = S_SLEEP) else '0';
+
+
+  -- Trap Priority Encoder ------------------------------------------------------------------
+  -- -------------------------------------------------------------------------------------------
+  trap.cause <=
+    -- standard RISC-V synchronous exceptions --
+    trap_iaf_c     when (trap.exc_buf(exc_iaccess_c) = '1') else -- instruction access fault
+    trap_iil_c     when (trap.exc_buf(exc_illegal_c) = '1') else -- illegal instruction
+    trap_ima_c     when (trap.exc_buf(exc_ialign_c)  = '1') else -- instruction address misaligned
+    trap_env       when (trap.exc_buf(exc_ecall_c)   = '1') else -- environment call from U/M-mode
+    trap_brk_c     when (trap.exc_buf(exc_ebreak_c)  = '1') else -- environment breakpoint
+    trap_sma_c     when (trap.exc_buf(exc_salign_c)  = '1') else -- store address misaligned
+    trap_lma_c     when (trap.exc_buf(exc_lalign_c)  = '1') else -- load address misaligned
+    trap_saf_c     when (trap.exc_buf(exc_saccess_c) = '1') else -- store access fault
+    trap_laf_c     when (trap.exc_buf(exc_laccess_c) = '1') else -- load access fault
+    -- standard RISC-V debug-mode traps --
+    trap_db_halt_c when (trap.irq_buf(irq_db_halt_c) = '1') else -- external halt request
+    trap_db_trig_c when (trap.exc_buf(exc_db_trig_c) = '1') else -- hardware trigger
+    trap_db_brkp_c when (trap.exc_buf(exc_db_brkp_c) = '1') else -- breakpoint
+    trap_db_step_c when (trap.exc_buf(exc_db_step_c) = '1') else -- single stepping
+    -- NEORV32-specific fast interrupts --
+    trap_firq0_c   when (trap.irq_buf(irq_firq_0_c)  = '1') else -- fast interrupt channel 0
+    trap_firq1_c   when (trap.irq_buf(irq_firq_1_c)  = '1') else -- fast interrupt channel 1
+    trap_firq2_c   when (trap.irq_buf(irq_firq_2_c)  = '1') else -- fast interrupt channel 2
+    trap_firq3_c   when (trap.irq_buf(irq_firq_3_c)  = '1') else -- fast interrupt channel 3
+    trap_firq4_c   when (trap.irq_buf(irq_firq_4_c)  = '1') else -- fast interrupt channel 4
+    trap_firq5_c   when (trap.irq_buf(irq_firq_5_c)  = '1') else -- fast interrupt channel 5
+    trap_firq6_c   when (trap.irq_buf(irq_firq_6_c)  = '1') else -- fast interrupt channel 6
+    trap_firq7_c   when (trap.irq_buf(irq_firq_7_c)  = '1') else -- fast interrupt channel 7
+    trap_firq8_c   when (trap.irq_buf(irq_firq_8_c)  = '1') else -- fast interrupt channel 8
+    trap_firq9_c   when (trap.irq_buf(irq_firq_9_c)  = '1') else -- fast interrupt channel 9
+    trap_firq10_c  when (trap.irq_buf(irq_firq_10_c) = '1') else -- fast interrupt channel 10
+    trap_firq11_c  when (trap.irq_buf(irq_firq_11_c) = '1') else -- fast interrupt channel 11
+    trap_firq12_c  when (trap.irq_buf(irq_firq_12_c) = '1') else -- fast interrupt channel 12
+    trap_firq13_c  when (trap.irq_buf(irq_firq_13_c) = '1') else -- fast interrupt channel 13
+    trap_firq14_c  when (trap.irq_buf(irq_firq_14_c) = '1') else -- fast interrupt channel 14
+    trap_firq15_c  when (trap.irq_buf(irq_firq_15_c) = '1') else -- fast interrupt channel 15
+    -- standard RISC-V interrupts --
+    trap_mei_c     when (trap.irq_buf(irq_mei_irq_c) = '1') else -- machine external interrupt (MEI)
+    trap_msi_c     when (trap.irq_buf(irq_msi_irq_c) = '1') else -- machine software interrupt (MSI)
+    trap_mti_c;  --when (trap.irq_buf(irq_mti_irq_c) = '1') else -- machine timer interrupt (MTI)
+
+  -- environment call helper --
+  trap_env <= trap_env_c(6 downto 2) & csr.prv_level & csr.prv_level;
+
+  -- exception program counter: async. interrupt or sync. exception? --
+  trap.pc <= exec.pc2 when (trap.cause(trap.cause'left) = '1') else exec.pc;
 
 
   -- Debug-Mode Control ---------------------------------------------------------------------
@@ -1211,7 +1211,7 @@ begin
             csr_rdata(0)  <= '1';                                   -- Zicsr: CSR access (always enabled)
             csr_rdata(1)  <= '1';                                   -- Zifencei: instruction stream sync. (always enabled)
             csr_rdata(2)  <= bool_to_ulogic_f(RISCV_ISA_Zmmul);     -- Zmmul: mul/div
-            csr_rdata(3)  <= bool_to_ulogic_f(RISCV_ISA_Zxcfu);     -- Zxcfu: custom instructions
+            csr_rdata(3)  <= bool_to_ulogic_f(RISCV_ISA_Xcfu);      -- Xcfu: custom instructions
             csr_rdata(4)  <= bool_to_ulogic_f(RISCV_ISA_Zkt);       -- Zkt: data independent execution latency
             csr_rdata(5)  <= bool_to_ulogic_f(RISCV_ISA_Zfinx);     -- Zfinx: FPU using x registers
             csr_rdata(6)  <= bool_to_ulogic_f(RISCV_ISA_Zicond);    -- Zicond: integer conditional operations

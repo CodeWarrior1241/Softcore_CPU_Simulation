@@ -8,7 +8,7 @@
 -- -------------------------------------------------------------------------------- --
 -- The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              --
 -- Copyright (c) NEORV32 contributors.                                              --
--- Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  --
+-- Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  --
 -- Licensed under the BSD-3-Clause license, see LICENSE for details.                --
 -- SPDX-License-Identifier: BSD-3-Clause                                            --
 -- ================================================================================ --
@@ -62,8 +62,8 @@ entity neorv32_vivado_ip is
     RISCV_ISA_Zknh        : boolean                        := false;
     RISCV_ISA_Zksed       : boolean                        := false;
     RISCV_ISA_Zksh        : boolean                        := false;
-    RISCV_ISA_Zxcfu       : boolean                        := false;
     RISCV_ISA_Smcntrpmf   : boolean                        := false;
+    RISCV_ISA_Xcfu        : boolean                        := false;
     -- Tuning Options --
     CPU_CONSTT_BR_EN      : boolean                        := false;
     CPU_FAST_MUL_EN       : boolean                        := false;
@@ -79,10 +79,12 @@ entity neorv32_vivado_ip is
     HPM_CNT_WIDTH         : natural range 0 to 64          := 40;
     -- Internal Instruction memory --
     IMEM_EN               : boolean                        := false;
+    IMEM_BASE             : std_ulogic_vector(31 downto 0) := x"00000000";
     IMEM_SIZE             : natural                        := 16384;
     IMEM_OUTREG_EN        : boolean                        := false;
     -- Internal Data memory --
     DMEM_EN               : boolean                        := false;
+    DMEM_BASE             : std_ulogic_vector(31 downto 0) := x"80000000";
     DMEM_SIZE             : natural                        := 8192;
     DMEM_OUTREG_EN        : boolean                        := false;
     -- CPU Caches --
@@ -90,7 +92,7 @@ entity neorv32_vivado_ip is
     ICACHE_NUM_BLOCKS     : natural range 1 to 4096        := 4;
     DCACHE_EN             : boolean                        := false;
     DCACHE_NUM_BLOCKS     : natural range 1 to 4096        := 4;
-    CACHE_BLOCK_SIZE      : natural range 8 to 1024        := 64;
+    CACHE_BLOCK_SIZE      : natural range 4 to 1024        := 64;
     CACHE_BURSTS_EN       : boolean                        := true;
     -- External Bus Interface --
     XBUS_EN               : boolean                        := false;
@@ -259,7 +261,7 @@ entity neorv32_vivado_ip is
     mtime_time_o   : out std_logic_vector(63 downto 0);
     -- CPU Interrupts --
     irq_msi_i      : in  std_logic := '0';
-    irw_mti_i      : in  std_logic := '0';
+    irq_mti_i      : in  std_logic := '0';
     irq_mei_i      : in  std_logic := '0'
   );
 end entity;
@@ -267,10 +269,11 @@ end entity;
 architecture neorv32_vivado_ip_rtl of neorv32_vivado_ip is
 
   -- auto-configuration --
-  constant num_gpio_c  : natural := cond_sel_natural_f(IO_GPIO_EN, max_natural_f(IO_GPIO_IN_NUM, IO_GPIO_OUT_NUM), 0);
-  constant num_pwm_c   : natural := cond_sel_natural_f(IO_PWM_EN, IO_PWM_NUM, 0);
-  constant num_gptmr_c : natural := cond_sel_natural_f(IO_GPTMR_EN, IO_GPTMR_NUM, 0);
+  constant num_pwm_c   : natural := sel_natural_f(IO_PWM_EN, IO_PWM_NUM, 0);
+  constant num_gptmr_c : natural := sel_natural_f(IO_GPTMR_EN, IO_GPTMR_NUM, 0);
   constant burst_en_c  : boolean := CACHE_BURSTS_EN and (ICACHE_EN or DCACHE_EN); -- any cache bursts?
+  constant max_gpio_c  : natural := sel_natural_f(boolean(IO_GPIO_IN_NUM > IO_GPIO_OUT_NUM), IO_GPIO_IN_NUM, IO_GPIO_OUT_NUM);
+  constant num_gpio_c  : natural := sel_natural_f(IO_GPIO_EN, max_gpio_c, 0);
 
   -- AXI4 bridge --
   component xbus2axi4_bridge
@@ -397,8 +400,8 @@ begin
     RISCV_ISA_Zknh      => RISCV_ISA_Zknh,
     RISCV_ISA_Zksed     => RISCV_ISA_Zksed,
     RISCV_ISA_Zksh      => RISCV_ISA_Zksh,
-    RISCV_ISA_Zxcfu     => RISCV_ISA_Zxcfu,
     RISCV_ISA_Smcntrpmf => RISCV_ISA_Smcntrpmf,
+    RISCV_ISA_Xcfu      => RISCV_ISA_Xcfu,
     -- Extension Options --
     CPU_CONSTT_BR_EN    => CPU_CONSTT_BR_EN,
     CPU_FAST_MUL_EN     => CPU_FAST_MUL_EN,
@@ -414,10 +417,12 @@ begin
     HPM_CNT_WIDTH       => HPM_CNT_WIDTH,
     -- Internal Instruction memory --
     IMEM_EN             => IMEM_EN,
+    IMEM_BASE           => IMEM_BASE,
     IMEM_SIZE           => IMEM_SIZE,
     IMEM_OUTREG_EN      => IMEM_OUTREG_EN,
     -- Internal Data memory --
     DMEM_EN             => DMEM_EN,
+    DMEM_BASE           => DMEM_BASE,
     DMEM_SIZE           => DMEM_SIZE,
     DMEM_OUTREG_EN      => DMEM_OUTREG_EN,
     -- CPU Caches --
@@ -432,7 +437,6 @@ begin
     XBUS_TIMEOUT        => XBUS_TIMEOUT,
     XBUS_REGSTAGE_EN    => XBUS_REGSTAGE_EN,
     -- Processor peripherals --
-    IO_DISABLE_SYSINFO  => false,
     IO_GPIO_NUM         => num_gpio_c,
     IO_CLINT_EN         => IO_CLINT_EN,
     IO_UART0_EN         => IO_UART0_EN,
@@ -549,7 +553,7 @@ begin
     mtime_time_o   => mtime_time_aux,
     -- CPU Interrupts --
     irq_msi_i      => std_ulogic(irq_msi_i),
-    irw_mti_i      => std_ulogic(irw_mti_i),
+    irq_mti_i      => std_ulogic(irq_mti_i),
     irq_mei_i      => std_ulogic(irq_mei_i)
   );
 

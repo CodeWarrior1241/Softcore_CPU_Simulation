@@ -61,8 +61,8 @@ entity neorv32_top is
     RISCV_ISA_Zksed     : boolean                        := false;         -- ShangMi block cipher extension
     RISCV_ISA_Zksh      : boolean                        := false;         -- ShangMi hash extension
     RISCV_ISA_Zmmul     : boolean                        := false;         -- multiply-only M sub-extension
-    RISCV_ISA_Zxcfu     : boolean                        := false;         -- custom (instr.) functions unit
     RISCV_ISA_Smcntrpmf : boolean                        := false;         -- counter privilege-mode filtering
+    RISCV_ISA_Xcfu      : boolean                        := false;         -- custom (instr.) functions unit
 
     -- Tuning Options --
     CPU_CONSTT_BR_EN    : boolean                        := false;         -- enable constant-time branches
@@ -71,31 +71,33 @@ entity neorv32_top is
     CPU_RF_ARCH_SEL     : natural range 0 to 3           := 0;             -- register file implementation style select
 
     -- Physical Memory Protection (PMP) --
-    PMP_NUM_REGIONS     : natural range 0 to 16          := 0;             -- number of regions (0..16)
+    PMP_NUM_REGIONS     : natural range 0 to 16          := 0;             -- number of regions
     PMP_MIN_GRANULARITY : natural                        := 4;             -- minimal region granularity in bytes, has to be a power of 2, min 4 bytes
     PMP_TOR_MODE_EN     : boolean                        := false;         -- implement TOR mode
     PMP_NAP_MODE_EN     : boolean                        := false;         -- implement NAPOT/NA4 modes
 
     -- Hardware Performance Monitors (HPM) --
-    HPM_NUM_CNTS        : natural range 0 to 13          := 0;             -- number of implemented HPM counters (0..13)
-    HPM_CNT_WIDTH       : natural range 0 to 64          := 40;            -- total size of HPM counters (0..64)
+    HPM_NUM_CNTS        : natural range 0 to 13          := 0;             -- number of implemented HPM counters
+    HPM_CNT_WIDTH       : natural range 0 to 64          := 40;            -- total size of HPM counters
 
     -- Internal Instruction memory (IMEM) --
     IMEM_EN             : boolean                        := false;         -- implement processor-internal instruction memory
+    IMEM_BASE           : std_ulogic_vector(31 downto 0) := x"00000000";   -- base address of processor-internal instruction memory (naturally aligned)
     IMEM_SIZE           : natural                        := 16*1024;       -- size of processor-internal instruction memory in bytes (use a power of 2)
     IMEM_OUTREG_EN      : boolean                        := false;         -- enable IMEM output register stage (for improved mapping/timing)
 
     -- Internal Data memory (DMEM) --
     DMEM_EN             : boolean                        := false;         -- implement processor-internal data memory
+    DMEM_BASE           : std_ulogic_vector(31 downto 0) := x"80000000";   -- base address of processor-internal data memory (naturally aligned)
     DMEM_SIZE           : natural                        := 8*1024;        -- size of processor-internal data memory in bytes (use a power of 2)
     DMEM_OUTREG_EN      : boolean                        := false;         -- enable DMEM output register stage (for improved mapping/timing)
 
     -- CPU Caches --
     ICACHE_EN           : boolean                        := false;         -- implement instruction cache (i-cache)
-    ICACHE_NUM_BLOCKS   : natural range 1 to 4096        := 4;             -- i-cache: number of blocks (min 1), has to be a power of 2
+    ICACHE_NUM_BLOCKS   : natural range 1 to 4096        := 4;             -- i-cache: number of blocks, has to be a power of 2
     DCACHE_EN           : boolean                        := false;         -- implement data cache (d-cache)
-    DCACHE_NUM_BLOCKS   : natural range 1 to 4096        := 4;             -- d-cache: number of blocks (min 1), has to be a power of 2
-    CACHE_BLOCK_SIZE    : natural range 8 to 1024        := 64;            -- i-cache/d-cache: block size in bytes (min 8), has to be a power of 2
+    DCACHE_NUM_BLOCKS   : natural range 1 to 4096        := 4;             -- d-cache: number of blocks, has to be a power of 2
+    CACHE_BLOCK_SIZE    : natural range 4 to 1024        := 64;            -- i-cache/d-cache: block size in bytes, has to be a power of 2
     CACHE_BURSTS_EN     : boolean                        := true;          -- i-cache/d-cache: enable issuing of burst transfer for cache update
 
     -- External bus interface (XBUS) --
@@ -104,41 +106,40 @@ entity neorv32_top is
     XBUS_REGSTAGE_EN    : boolean                        := false;         -- add XBUS register stage
 
     -- Processor peripherals --
-    IO_DISABLE_SYSINFO  : boolean                        := false;         -- disable the SYSINFO module (for advanced users only)
-    IO_GPIO_NUM         : natural range 0 to 32          := 0;             -- number of GPIO input/output pairs (0..32)
+    IO_GPIO_NUM         : natural range 0 to 32          := 0;             -- number of GPIO input/output pairs
     IO_CLINT_EN         : boolean                        := false;         -- implement core local interruptor (CLINT)
     IO_UART0_EN         : boolean                        := false;         -- implement primary universal asynchronous receiver/transmitter (UART0)
-    IO_UART0_RX_FIFO    : natural range 1 to 2**15       := 1;             -- RX FIFO depth, has to be a power of two, min 1
-    IO_UART0_TX_FIFO    : natural range 1 to 2**15       := 1;             -- TX FIFO depth, has to be a power of two, min 1
+    IO_UART0_RX_FIFO    : natural range 1 to 2**15       := 1;             -- RX FIFO depth, has to be a power of two
+    IO_UART0_TX_FIFO    : natural range 1 to 2**15       := 1;             -- TX FIFO depth, has to be a power of two
     IO_UART1_EN         : boolean                        := false;         -- implement secondary universal asynchronous receiver/transmitter (UART1)
-    IO_UART1_RX_FIFO    : natural range 1 to 2**15       := 1;             -- RX FIFO depth, has to be a power of two, min 1
-    IO_UART1_TX_FIFO    : natural range 1 to 2**15       := 1;             -- TX FIFO depth, has to be a power of two, min 1
+    IO_UART1_RX_FIFO    : natural range 1 to 2**15       := 1;             -- RX FIFO depth, has to be a power of two
+    IO_UART1_TX_FIFO    : natural range 1 to 2**15       := 1;             -- TX FIFO depth, has to be a power of two
     IO_SPI_EN           : boolean                        := false;         -- implement serial peripheral interface (SPI)
-    IO_SPI_FIFO         : natural range 1 to 2**15       := 1;             -- RTX FIFO depth, has to be a power of two, min 1
+    IO_SPI_FIFO         : natural range 1 to 2**15       := 1;             -- RTX FIFO depth, has to be a power of two
     IO_SDI_EN           : boolean                        := false;         -- implement serial data interface (SDI)
-    IO_SDI_FIFO         : natural range 1 to 2**15       := 1;             -- RTX FIFO depth, has to be zero or a power of two, min 1
+    IO_SDI_FIFO         : natural range 1 to 2**15       := 1;             -- RTX FIFO depth, has to be zero or a power of two
     IO_TWI_EN           : boolean                        := false;         -- implement two-wire interface (TWI)
-    IO_TWI_FIFO         : natural range 1 to 2**15       := 1;             -- RTX FIFO depth, has to be zero or a power of two, min 1
+    IO_TWI_FIFO         : natural range 1 to 2**15       := 1;             -- RTX FIFO depth, has to be zero or a power of two
     IO_TWD_EN           : boolean                        := false;         -- implement two-wire device (TWD)
-    IO_TWD_RX_FIFO      : natural range 1 to 2**15       := 1;             -- TX FIFO depth, has to be zero or a power of two, min 1
-    IO_TWD_TX_FIFO      : natural range 1 to 2**15       := 1;             -- RX FIFO depth, has to be zero or a power of two, min 1
-    IO_PWM_NUM          : natural range 0 to 32          := 0;             -- number of PWM channels to implement (0..32)
+    IO_TWD_RX_FIFO      : natural range 1 to 2**15       := 1;             -- TX FIFO depth, has to be zero or a power of two
+    IO_TWD_TX_FIFO      : natural range 1 to 2**15       := 1;             -- RX FIFO depth, has to be zero or a power of two
+    IO_PWM_NUM          : natural range 0 to 32          := 0;             -- number of PWM channels to implement
     IO_WDT_EN           : boolean                        := false;         -- implement watch dog timer (WDT)
     IO_TRNG_EN          : boolean                        := false;         -- implement true random number generator (TRNG)
-    IO_TRNG_FIFO        : natural range 1 to 2**15       := 1;             -- data FIFO depth, has to be a power of two, min 1
+    IO_TRNG_FIFO        : natural range 1 to 2**15       := 1;             -- data FIFO depth, has to be a power of two
     IO_CFS_EN           : boolean                        := false;         -- implement custom functions subsystem (CFS)
     IO_NEOLED_EN        : boolean                        := false;         -- implement NeoPixel-compatible smart LED interface (NEOLED)
-    IO_NEOLED_TX_FIFO   : natural range 1 to 2**15       := 1;             -- NEOLED FIFO depth, has to be a power of two, min 1
+    IO_NEOLED_TX_FIFO   : natural range 1 to 2**15       := 1;             -- NEOLED FIFO depth, has to be a power of two
     IO_GPTMR_NUM        : natural range 0 to 16          := 0;             -- number of GPTMR timer slices to implement (0..16)
     IO_ONEWIRE_EN       : boolean                        := false;         -- implement 1-wire interface (ONEWIRE)
-    IO_ONEWIRE_FIFO     : natural range 1 to 2**15       := 1;             -- RTX FIFO depth, has to be zero or a power of two, min 1
+    IO_ONEWIRE_FIFO     : natural range 1 to 2**15       := 1;             -- RTX FIFO depth, has to be zero or a power of two
     IO_DMA_EN           : boolean                        := false;         -- implement direct memory access controller (DMA)
-    IO_DMA_DSC_FIFO     : natural range 4 to 512         := 4;             -- DMA descriptor FIFO depth, has to be a power of two, min 4
+    IO_DMA_DSC_FIFO     : natural range 4 to 512         := 4;             -- DMA descriptor FIFO depth, has to be a power of two
     IO_SLINK_EN         : boolean                        := false;         -- implement stream link interface (SLINK)
-    IO_SLINK_RX_FIFO    : natural range 1 to 2**15       := 1;             -- RX FIFO depth, has to be a power of two, min 1
-    IO_SLINK_TX_FIFO    : natural range 1 to 2**15       := 1;             -- TX FIFO depth, has to be a power of two, min 1
+    IO_SLINK_RX_FIFO    : natural range 1 to 2**15       := 1;             -- RX FIFO depth, has to be a power of two
+    IO_SLINK_TX_FIFO    : natural range 1 to 2**15       := 1;             -- TX FIFO depth, has to be a power of two
     IO_TRACER_EN        : boolean                        := false;         -- implement instruction tracer
-    IO_TRACER_BUFFER    : natural range 1 to 2**15       := 1;             -- trace buffer depth, has to be a power of two, min 1
+    IO_TRACER_BUFFER    : natural range 1 to 2**15       := 1;             -- trace buffer depth, has to be a power of two
     IO_TRACER_SIMLOG_EN : boolean                        := false          -- write full trace log to file (simulation-only)
   );
   port (
@@ -242,7 +243,7 @@ entity neorv32_top is
 
     -- CPU interrupts --
     irq_msi_i      : in  std_ulogic := 'L';                                  -- machine software interrupt, available if IO_CLINT_EN = false
-    irw_mti_i      : in  std_ulogic := 'L';                                  -- machine timer interrupt, available if IO_CLINT_EN = false
+    irq_mti_i      : in  std_ulogic := 'L';                                  -- machine timer interrupt, available if IO_CLINT_EN = false
     irq_mei_i      : in  std_ulogic := 'L'                                   -- machine external interrupt
   );
 end neorv32_top;
@@ -259,25 +260,24 @@ architecture neorv32_top_rtl of neorv32_top is
   constant bootrom_en_c    : boolean := boolean(BOOT_MODE_SELECT = 0);
   constant imem_as_rom_c   : boolean := boolean(BOOT_MODE_SELECT = 2);
   constant cpu_boot_addr_c : std_ulogic_vector(31 downto 0) :=
-    cond_sel_suv_f(boolean(BOOT_MODE_SELECT = 0), base_io_bootrom_c,
-    cond_sel_suv_f(boolean(BOOT_MODE_SELECT = 1), BOOT_ADDR_CUSTOM,
-    cond_sel_suv_f(boolean(BOOT_MODE_SELECT = 2), mem_imem_base_c, x"00000000")));
+    sel_suv_f(boolean(BOOT_MODE_SELECT = 0), base_io_bootrom_c,
+    sel_suv_f(boolean(BOOT_MODE_SELECT = 1), BOOT_ADDR_CUSTOM,
+    sel_suv_f(boolean(BOOT_MODE_SELECT = 2), IMEM_BASE, x"00000000")));
 
   -- auto-configuration --
-  constant num_cores_c     : natural := cond_sel_natural_f(DUAL_CORE_EN, 2, 1);
+  constant num_cores_c     : natural := sel_natural_f(DUAL_CORE_EN, 2, 1);
   constant io_gpio_en_c    : boolean := boolean(IO_GPIO_NUM > 0);
   constant io_pwm_en_c     : boolean := boolean(IO_PWM_NUM > 0);
   constant io_gptmr_en_c   : boolean := boolean(IO_GPTMR_NUM > 0);
   constant cpu_smpmp_en_c  : boolean := boolean(PMP_NUM_REGIONS > 0);
-  constant io_sysinfo_en_c : boolean := not IO_DISABLE_SYSINFO;
   constant ocd_auth_en_c   : boolean := OCD_EN and OCD_AUTHENTICATION;
   constant cpu_sdtrig_en_c : boolean := OCD_EN and boolean(OCD_NUM_HW_TRIGGERS > 0);
   constant trace_en_c      : boolean := TRACE_PORT_EN or IO_TRACER_EN;
   constant vendorid_c      : std_ulogic_vector(31 downto 0) := x"00000" & '0' & OCD_JEDEC_ID;
 
   -- make sure physical memory sizes are a power of two --
-  constant imem_size_c : natural := cond_sel_natural_f(is_power_of_two_f(IMEM_SIZE), IMEM_SIZE, 2**index_size_f(IMEM_SIZE));
-  constant dmem_size_c : natural := cond_sel_natural_f(is_power_of_two_f(DMEM_SIZE), DMEM_SIZE, 2**index_size_f(DMEM_SIZE));
+  constant imem_size_c : natural := 2**index_size_f(IMEM_SIZE);
+  constant dmem_size_c : natural := 2**index_size_f(DMEM_SIZE);
 
   -- reset nets --
   signal rstn_wdt, rstn_sys, rstn_ext : std_ulogic;
@@ -350,74 +350,74 @@ begin
     -- show SoC configuration --
     assert false report
       "[NEORV32] Processor Configuration: CPU " & -- cpu core is always enabled
-      cond_sel_string_f(boolean(num_cores_c = 1), "(single-core) ",   "") &
-      cond_sel_string_f(boolean(num_cores_c = 2), "(smp-dual-core) ", "") &
-      cond_sel_string_f(IMEM_EN,         cond_sel_string_f(imem_as_rom_c, "IMEM-ROM ", "IMEM "), "") &
-      cond_sel_string_f(DMEM_EN,         "DMEM ",     "") &
-      cond_sel_string_f(bootrom_en_c,    "BOOTROM ",  "") &
-      cond_sel_string_f(ICACHE_EN,       "I-CACHE ",  "") &
-      cond_sel_string_f(DCACHE_EN,       "D-CACHE ",  "") &
-      cond_sel_string_f(XBUS_EN,         "XBUS ",     "") &
-      cond_sel_string_f(IO_CLINT_EN,     "CLINT ",    "") &
-      cond_sel_string_f(io_gpio_en_c,    "GPIO ",     "") &
-      cond_sel_string_f(IO_UART0_EN,     "UART0 ",    "") &
-      cond_sel_string_f(IO_UART1_EN,     "UART1 ",    "") &
-      cond_sel_string_f(IO_SPI_EN,       "SPI ",      "") &
-      cond_sel_string_f(IO_SDI_EN,       "SDI ",      "") &
-      cond_sel_string_f(IO_TWI_EN,       "TWI ",      "") &
-      cond_sel_string_f(IO_TWD_EN,       "TWD ",      "") &
-      cond_sel_string_f(io_pwm_en_c,     "PWM ",      "") &
-      cond_sel_string_f(IO_WDT_EN,       "WDT ",      "") &
-      cond_sel_string_f(IO_TRNG_EN,      "TRNG ",     "") &
-      cond_sel_string_f(IO_CFS_EN,       "CFS ",      "") &
-      cond_sel_string_f(IO_NEOLED_EN,    "NEOLED ",   "") &
-      cond_sel_string_f(io_gptmr_en_c,   "GPTMR ",    "") &
-      cond_sel_string_f(IO_ONEWIRE_EN,   "ONEWIRE ",  "") &
-      cond_sel_string_f(IO_DMA_EN,       "DMA ",      "") &
-      cond_sel_string_f(IO_SLINK_EN,     "SLINK ",    "") &
-      cond_sel_string_f(io_sysinfo_en_c, "SYSINFO ",  "") &
-      cond_sel_string_f(IO_TRACER_EN,    "TRACER ",   "") &
-      cond_sel_string_f(OCD_EN,          "OCD ",      "") &
-      cond_sel_string_f(OCD_EN,          "OCD-AUTH ", "") &
-      cond_sel_string_f(OCD_EN,          "OCD-HWBP ", "") &
+      sel_string_f(boolean(num_cores_c = 1), "(single-core) ",   "") &
+      sel_string_f(boolean(num_cores_c = 2), "(smp-dual-core) ", "") &
+      sel_string_f(IMEM_EN,       sel_string_f(imem_as_rom_c, "IMEM-ROM ", "IMEM "), "") &
+      sel_string_f(DMEM_EN,       "DMEM ",     "") &
+      sel_string_f(bootrom_en_c,  "BOOTROM ",  "") &
+      sel_string_f(ICACHE_EN,     "I-CACHE ",  "") &
+      sel_string_f(DCACHE_EN,     "D-CACHE ",  "") &
+      sel_string_f(XBUS_EN,       "XBUS ",     "") &
+      sel_string_f(IO_CLINT_EN,   "CLINT ",    "") &
+      sel_string_f(io_gpio_en_c,  "GPIO ",     "") &
+      sel_string_f(IO_UART0_EN,   "UART0 ",    "") &
+      sel_string_f(IO_UART1_EN,   "UART1 ",    "") &
+      sel_string_f(IO_SPI_EN,     "SPI ",      "") &
+      sel_string_f(IO_SDI_EN,     "SDI ",      "") &
+      sel_string_f(IO_TWI_EN,     "TWI ",      "") &
+      sel_string_f(IO_TWD_EN,     "TWD ",      "") &
+      sel_string_f(io_pwm_en_c,   "PWM ",      "") &
+      sel_string_f(IO_WDT_EN,     "WDT ",      "") &
+      sel_string_f(IO_TRNG_EN,    "TRNG ",     "") &
+      sel_string_f(IO_CFS_EN,     "CFS ",      "") &
+      sel_string_f(IO_NEOLED_EN,  "NEOLED ",   "") &
+      sel_string_f(io_gptmr_en_c, "GPTMR ",    "") &
+      sel_string_f(IO_ONEWIRE_EN, "ONEWIRE ",  "") &
+      sel_string_f(IO_DMA_EN,     "DMA ",      "") &
+      sel_string_f(IO_SLINK_EN,   "SLINK ",    "") &
+      sel_string_f(true,          "SYSINFO ",  "") & -- always enabled
+      sel_string_f(IO_TRACER_EN,  "TRACER ",   "") &
+      sel_string_f(OCD_EN,        "OCD ",      "") &
+      sel_string_f(OCD_EN,        "OCD-AUTH ", "") &
+      sel_string_f(OCD_EN,        "OCD-HWBP ", "") &
       ""
       severity note;
 
-    -- IMEM size was not a power of two --
-    assert not ((IMEM_SIZE /= imem_size_c) and IMEM_EN) report
-      "[NEORV32] Auto-adjusting invalid IMEM size configuration." severity warning;
+    -- simulation notifier --
+    assert not is_simulation_c report
+      "[NEORV32] Assuming this is a simulation." severity warning;
 
-    -- DMEM size was not a power of two --
-    assert not ((DMEM_SIZE /= dmem_size_c) and DMEM_EN) report
-      "[NEORV32] Auto-adjusting invalid DMEM size configuration." severity warning;
-
-    -- SYSINFO disabled --
-    assert io_sysinfo_en_c report
-      "[NEORV32] SYSINFO module disabled - NEORV32 software framework will not function properly!" severity warning;
-
-    -- Clock speed not defined --
+    -- clock speed not defined --
     assert (CLOCK_FREQUENCY > 0) report
       "[NEORV32] CLOCK_FREQUENCY must be configured according to the frequency of clk_i port!" severity warning;
 
-    -- Boot configuration notifier --
-    assert not (BOOT_MODE_SELECT = 0) report "[NEORV32] BOOT_MODE_SELECT 0 - booting via bootloader" severity note;
-    assert not (BOOT_MODE_SELECT = 1) report "[NEORV32] BOOT_MODE_SELECT 1 - booting from custom address" severity note;
-    assert not (BOOT_MODE_SELECT = 2) report "[NEORV32] BOOT_MODE_SELECT 2 - booting IMEM image" severity note;
+    -- boot configuration notifier --
+    assert not (BOOT_MODE_SELECT = 0) report
+      "[NEORV32] BOOT_MODE_SELECT 0 - booting via bootloader" severity note;
+    assert not (BOOT_MODE_SELECT = 1) report
+      "[NEORV32] BOOT_MODE_SELECT 1 - booting from custom address" severity note;
+    assert not (BOOT_MODE_SELECT = 2) report
+      "[NEORV32] BOOT_MODE_SELECT 2 - booting IMEM image" severity note;
 
-    -- Boot configuration: boot from initialized IMEM requires the IMEM to be enabled --
+    -- boot configuration: boot from initialized IMEM requires the IMEM to be enabled --
     assert not ((BOOT_MODE_SELECT = 2) and (not IMEM_EN)) report
-      "[NEORV32] BOOT_MODE_SELECT = 2 (boot IMEM image) requires the internal instruction memory (IMEM) to be enabled!" severity error;
+      "[NEORV32] BOOT_MODE_SELECT = 2 (boot IMEM image) requires the internal instruction memory (IMEM)!" severity error;
 
-    -- The SMP dual-core configuration requires the CLINT --
+    -- SMP dual-core configuration requires the CLINT --
     assert not (DUAL_CORE_EN and (not IO_CLINT_EN)) report
-      "[NEORV32] The SMP dual-core configuration requires the CLINT to be enabled!" severity error;
+      "[NEORV32] SMP dual-core configuration requires the CLINT!" severity error;
 
-    -- XBUS interface might generate burst transfers --
-    assert not (XBUS_EN and (ICACHE_EN or DCACHE_EN)) report
-      "[NEORV32] XBUS will emit burst transfers for cached addresses!" severity warning;
+    -- custom IMEM adress --
+    assert not (IMEM_EN and (IMEM_BASE /= x"00000000")) report
+      "[NEORV32] Using non-default IMEM base address. Configure SW framework accordingly." severity warning;
+    assert (or_reduce_f(IMEM_BASE(index_size_f(imem_size_c)-1 downto 0)) = '0') report
+      "[NEORV32] IMEM base address has to be naturally aligned to its size!" severity error;
 
-    -- simulation notifier --
-    assert not is_simulation_c report "[NEORV32] Assuming this is a simulation." severity warning;
+    -- custom DMEM adress --
+    assert not (DMEM_EN and (DMEM_BASE /= x"80000000")) report
+      "[NEORV32] Using non-default DMEM base address. Configure SW framework accordingly." severity warning;
+    assert (or_reduce_f(DMEM_BASE(index_size_f(dmem_size_c)-1 downto 0)) = '0') report
+      "[NEORV32] DMEM base address has to be naturally aligned to its size!" severity error;
 
   end generate;
 
@@ -514,11 +514,11 @@ begin
       RISCV_ISA_Zksed     => RISCV_ISA_Zksed,
       RISCV_ISA_Zksh      => RISCV_ISA_Zksh,
       RISCV_ISA_Zmmul     => RISCV_ISA_Zmmul,
-      RISCV_ISA_Zxcfu     => RISCV_ISA_Zxcfu,
       RISCV_ISA_Sdext     => OCD_EN,
       RISCV_ISA_Sdtrig    => cpu_sdtrig_en_c,
       RISCV_ISA_Smcntrpmf => RISCV_ISA_Smcntrpmf,
       RISCV_ISA_Smpmp     => cpu_smpmp_en_c,
+      RISCV_ISA_Xcfu      => RISCV_ISA_Xcfu,
       -- Tuning Options --
       CPU_TRACE_EN        => trace_en_c,
       CPU_CONSTT_BR_EN    => CPU_CONSTT_BR_EN,
@@ -619,7 +619,7 @@ begin
     generic map (
       ROUND_ROBIN_EN => false, -- use prioritizing arbitration
       A_READ_ONLY    => false,
-      B_READ_ONLY    => true   -- instruction fetch is read-only
+      B_READ_ONLY    => true -- instruction fetch is read-only
     )
     port map (
       clk_i   => clk_i,
@@ -781,11 +781,11 @@ begin
     TMO_EXT => XBUS_TIMEOUT,
     -- port A: internal IMEM --
     A_EN    => IMEM_EN,
-    A_BASE  => mem_imem_base_c,
+    A_BASE  => IMEM_BASE,
     A_SIZE  => imem_size_c,
     -- port B: internal DMEM --
     B_EN    => DMEM_EN,
-    B_BASE  => mem_dmem_base_c,
+    B_BASE  => DMEM_BASE,
     B_SIZE  => dmem_size_c,
     -- port C: IO --
     C_EN    => true,
@@ -826,9 +826,9 @@ begin
     if IMEM_EN generate
       neorv32_imem_inst: entity neorv32.neorv32_imem
       generic map (
-        MEM_SIZE  => imem_size_c,
-        MEM_INIT  => imem_as_rom_c,
-        OUTREG_EN => IMEM_OUTREG_EN
+        MEM_SIZE => imem_size_c,
+        MEM_INIT => imem_as_rom_c,
+        OUTREG   => IMEM_OUTREG_EN
       )
       port map (
         clk_i     => clk_i,
@@ -849,8 +849,8 @@ begin
     if DMEM_EN generate
       neorv32_dmem_inst: entity neorv32.neorv32_dmem
       generic map (
-        MEM_SIZE  => dmem_size_c,
-        OUTREG_EN => DMEM_OUTREG_EN
+        MEM_SIZE => dmem_size_c,
+        OUTREG   => DMEM_OUTREG_EN
       )
       port map (
         clk_i     => clk_i,
@@ -920,38 +920,38 @@ begin
     neorv32_bus_io_switch_inst: entity neorv32.neorv32_bus_io_switch
     generic map (
       DEV_SIZE  => iodev_size_c,
-      DEV_00_EN => bootrom_en_c,    DEV_00_BASE => base_io_bootrom_c,
-      DEV_01_EN => false,           DEV_01_BASE => (others => '0'), -- reserved
-      DEV_02_EN => false,           DEV_02_BASE => (others => '0'), -- reserved
-      DEV_03_EN => false,           DEV_03_BASE => (others => '0'), -- reserved
-      DEV_04_EN => false,           DEV_04_BASE => (others => '0'), -- reserved
-      DEV_05_EN => false,           DEV_05_BASE => (others => '0'), -- reserved
-      DEV_06_EN => false,           DEV_06_BASE => (others => '0'), -- reserved
-      DEV_07_EN => false,           DEV_07_BASE => (others => '0'), -- reserved
-      DEV_08_EN => false,           DEV_08_BASE => (others => '0'), -- reserved
-      DEV_09_EN => false,           DEV_09_BASE => (others => '0'), -- reserved
-      DEV_10_EN => IO_TWD_EN,       DEV_10_BASE => base_io_twd_c,
-      DEV_11_EN => IO_CFS_EN,       DEV_11_BASE => base_io_cfs_c,
-      DEV_12_EN => IO_SLINK_EN,     DEV_12_BASE => base_io_slink_c,
-      DEV_13_EN => IO_DMA_EN,       DEV_13_BASE => base_io_dma_c,
-      DEV_14_EN => false,           DEV_14_BASE => (others => '0'), -- reserved
-      DEV_15_EN => false,           DEV_15_BASE => (others => '0'), -- reserved
-      DEV_16_EN => io_pwm_en_c,     DEV_16_BASE => base_io_pwm_c,
-      DEV_17_EN => io_gptmr_en_c,   DEV_17_BASE => base_io_gptmr_c,
-      DEV_18_EN => IO_ONEWIRE_EN,   DEV_18_BASE => base_io_onewire_c,
-      DEV_19_EN => IO_TRACER_EN,    DEV_19_BASE => base_io_tracer_c,
-      DEV_20_EN => IO_CLINT_EN,     DEV_20_BASE => base_io_clint_c,
-      DEV_21_EN => IO_UART0_EN,     DEV_21_BASE => base_io_uart0_c,
-      DEV_22_EN => IO_UART1_EN,     DEV_22_BASE => base_io_uart1_c,
-      DEV_23_EN => IO_SDI_EN,       DEV_23_BASE => base_io_sdi_c,
-      DEV_24_EN => IO_SPI_EN,       DEV_24_BASE => base_io_spi_c,
-      DEV_25_EN => IO_TWI_EN,       DEV_25_BASE => base_io_twi_c,
-      DEV_26_EN => IO_TRNG_EN,      DEV_26_BASE => base_io_trng_c,
-      DEV_27_EN => IO_WDT_EN,       DEV_27_BASE => base_io_wdt_c,
-      DEV_28_EN => io_gpio_en_c,    DEV_28_BASE => base_io_gpio_c,
-      DEV_29_EN => IO_NEOLED_EN,    DEV_29_BASE => base_io_neoled_c,
-      DEV_30_EN => io_sysinfo_en_c, DEV_30_BASE => base_io_sysinfo_c,
-      DEV_31_EN => OCD_EN,          DEV_31_BASE => base_io_ocd_c
+      DEV_00_EN => bootrom_en_c,  DEV_00_BASE => base_io_bootrom_c,
+      DEV_01_EN => false,         DEV_01_BASE => (others => '0'), -- reserved
+      DEV_02_EN => false,         DEV_02_BASE => (others => '0'), -- reserved
+      DEV_03_EN => false,         DEV_03_BASE => (others => '0'), -- reserved
+      DEV_04_EN => false,         DEV_04_BASE => (others => '0'), -- reserved
+      DEV_05_EN => false,         DEV_05_BASE => (others => '0'), -- reserved
+      DEV_06_EN => false,         DEV_06_BASE => (others => '0'), -- reserved
+      DEV_07_EN => false,         DEV_07_BASE => (others => '0'), -- reserved
+      DEV_08_EN => false,         DEV_08_BASE => (others => '0'), -- reserved
+      DEV_09_EN => false,         DEV_09_BASE => (others => '0'), -- reserved
+      DEV_10_EN => IO_TWD_EN,     DEV_10_BASE => base_io_twd_c,
+      DEV_11_EN => IO_CFS_EN,     DEV_11_BASE => base_io_cfs_c,
+      DEV_12_EN => IO_SLINK_EN,   DEV_12_BASE => base_io_slink_c,
+      DEV_13_EN => IO_DMA_EN,     DEV_13_BASE => base_io_dma_c,
+      DEV_14_EN => false,         DEV_14_BASE => (others => '0'), -- reserved
+      DEV_15_EN => false,         DEV_15_BASE => (others => '0'), -- reserved
+      DEV_16_EN => io_pwm_en_c,   DEV_16_BASE => base_io_pwm_c,
+      DEV_17_EN => io_gptmr_en_c, DEV_17_BASE => base_io_gptmr_c,
+      DEV_18_EN => IO_ONEWIRE_EN, DEV_18_BASE => base_io_onewire_c,
+      DEV_19_EN => IO_TRACER_EN,  DEV_19_BASE => base_io_tracer_c,
+      DEV_20_EN => IO_CLINT_EN,   DEV_20_BASE => base_io_clint_c,
+      DEV_21_EN => IO_UART0_EN,   DEV_21_BASE => base_io_uart0_c,
+      DEV_22_EN => IO_UART1_EN,   DEV_22_BASE => base_io_uart1_c,
+      DEV_23_EN => IO_SDI_EN,     DEV_23_BASE => base_io_sdi_c,
+      DEV_24_EN => IO_SPI_EN,     DEV_24_BASE => base_io_spi_c,
+      DEV_25_EN => IO_TWI_EN,     DEV_25_BASE => base_io_twi_c,
+      DEV_26_EN => IO_TRNG_EN,    DEV_26_BASE => base_io_trng_c,
+      DEV_27_EN => IO_WDT_EN,     DEV_27_BASE => base_io_wdt_c,
+      DEV_28_EN => io_gpio_en_c,  DEV_28_BASE => base_io_gpio_c,
+      DEV_29_EN => IO_NEOLED_EN,  DEV_29_BASE => base_io_neoled_c,
+      DEV_30_EN => true,          DEV_30_BASE => base_io_sysinfo_c, -- allways enabled
+      DEV_31_EN => OCD_EN,        DEV_31_BASE => base_io_ocd_c
     )
     port map (
       clk_i        => clk_i,
@@ -994,9 +994,9 @@ begin
 
     -- Processor-Internal Bootloader ROM (BOOTROM) --------------------------------------------
     -- -------------------------------------------------------------------------------------------
-    neorv32_boot_rom_enabled:
+    neorv32_bootrom_enabled:
     if bootrom_en_c generate
-      neorv32_boot_rom_inst: entity neorv32.neorv32_boot_rom
+      neorv32_boot_rom_inst: entity neorv32.neorv32_bootrom
       port map (
         clk_i     => clk_i,
         rstn_i    => rstn_sys,
@@ -1133,7 +1133,7 @@ begin
     if not IO_CLINT_EN generate
       iodev_rsp(IODEV_CLINT) <= rsp_terminate_c;
       mtime_time_o           <= (others => '0');
-      mti                    <= (others => irw_mti_i); -- TODO: provide individual top ports for dual-core w/o internal CLINT
+      mti                    <= (others => irq_mti_i); -- TODO: provide individual top ports for dual-core w/o internal CLINT
       msi                    <= (others => irq_msi_i); -- TODO: provide individual top ports for dual-core w/o internal CLINT
     end generate;
 
@@ -1485,61 +1485,53 @@ begin
 
     -- System Configuration Information Memory (SYSINFO) --------------------------------------
     -- -------------------------------------------------------------------------------------------
-    neorv32_sysinfo_enabled:
-    if io_sysinfo_en_c generate
-      neorv32_sysinfo_inst: entity neorv32.neorv32_sysinfo
-      generic map (
-        BUS_TMO_INT       => int_bus_tmo_c,
-        BUS_TMO_EXT       => XBUS_TIMEOUT,
-        NUM_HARTS         => num_cores_c,
-        CLOCK_FREQUENCY   => CLOCK_FREQUENCY,
-        BOOT_MODE_SELECT  => BOOT_MODE_SELECT,
-        INT_BOOTLOADER_EN => bootrom_en_c,
-        IMEM_EN           => IMEM_EN,
-        IMEM_ROM          => imem_as_rom_c,
-        IMEM_SIZE         => imem_size_c,
-        DMEM_EN           => DMEM_EN,
-        DMEM_SIZE         => dmem_size_c,
-        ICACHE_EN         => ICACHE_EN,
-        ICACHE_NUM_BLOCKS => ICACHE_NUM_BLOCKS,
-        DCACHE_EN         => DCACHE_EN,
-        DCACHE_NUM_BLOCKS => DCACHE_NUM_BLOCKS,
-        CACHE_BLOCK_SIZE  => CACHE_BLOCK_SIZE,
-        CACHE_BURSTS_EN   => CACHE_BURSTS_EN,
-        XBUS_EN           => XBUS_EN,
-        OCD_EN            => OCD_EN,
-        OCD_AUTH          => ocd_auth_en_c,
-        IO_GPIO_EN        => io_gpio_en_c,
-        IO_CLINT_EN       => IO_CLINT_EN,
-        IO_UART0_EN       => IO_UART0_EN,
-        IO_UART1_EN       => IO_UART1_EN,
-        IO_SPI_EN         => IO_SPI_EN,
-        IO_SDI_EN         => IO_SDI_EN,
-        IO_TWI_EN         => IO_TWI_EN,
-        IO_TWD_EN         => IO_TWD_EN,
-        IO_PWM_EN         => io_pwm_en_c,
-        IO_WDT_EN         => IO_WDT_EN,
-        IO_TRNG_EN        => IO_TRNG_EN,
-        IO_CFS_EN         => IO_CFS_EN,
-        IO_NEOLED_EN      => IO_NEOLED_EN,
-        IO_GPTMR_EN       => io_gptmr_en_c,
-        IO_ONEWIRE_EN     => IO_ONEWIRE_EN,
-        IO_DMA_EN         => IO_DMA_EN,
-        IO_SLINK_EN       => IO_SLINK_EN,
-        IO_TRACER_EN      => IO_TRACER_EN
-      )
-      port map (
-        clk_i     => clk_i,
-        rstn_i    => rstn_sys,
-        bus_req_i => iodev_req(IODEV_SYSINFO),
-        bus_rsp_o => iodev_rsp(IODEV_SYSINFO)
-      );
-    end generate;
-
-    neorv32_sysinfo_disabled:
-    if not io_sysinfo_en_c generate
-      iodev_rsp(IODEV_SYSINFO) <= rsp_terminate_c;
-    end generate;
+    neorv32_sysinfo_inst: entity neorv32.neorv32_sysinfo
+    generic map (
+      BUS_TMO_INT       => int_bus_tmo_c,
+      BUS_TMO_EXT       => XBUS_TIMEOUT,
+      NUM_HARTS         => num_cores_c,
+      CLOCK_FREQUENCY   => CLOCK_FREQUENCY,
+      BOOT_MODE_SELECT  => BOOT_MODE_SELECT,
+      INT_BOOTLOADER_EN => bootrom_en_c,
+      IMEM_EN           => IMEM_EN,
+      IMEM_ROM          => imem_as_rom_c,
+      IMEM_SIZE         => imem_size_c,
+      DMEM_EN           => DMEM_EN,
+      DMEM_SIZE         => dmem_size_c,
+      ICACHE_EN         => ICACHE_EN,
+      ICACHE_NUM_BLOCKS => ICACHE_NUM_BLOCKS,
+      DCACHE_EN         => DCACHE_EN,
+      DCACHE_NUM_BLOCKS => DCACHE_NUM_BLOCKS,
+      CACHE_BLOCK_SIZE  => CACHE_BLOCK_SIZE,
+      CACHE_BURSTS_EN   => CACHE_BURSTS_EN,
+      XBUS_EN           => XBUS_EN,
+      OCD_EN            => OCD_EN,
+      OCD_AUTH          => ocd_auth_en_c,
+      IO_GPIO_EN        => io_gpio_en_c,
+      IO_CLINT_EN       => IO_CLINT_EN,
+      IO_UART0_EN       => IO_UART0_EN,
+      IO_UART1_EN       => IO_UART1_EN,
+      IO_SPI_EN         => IO_SPI_EN,
+      IO_SDI_EN         => IO_SDI_EN,
+      IO_TWI_EN         => IO_TWI_EN,
+      IO_TWD_EN         => IO_TWD_EN,
+      IO_PWM_EN         => io_pwm_en_c,
+      IO_WDT_EN         => IO_WDT_EN,
+      IO_TRNG_EN        => IO_TRNG_EN,
+      IO_CFS_EN         => IO_CFS_EN,
+      IO_NEOLED_EN      => IO_NEOLED_EN,
+      IO_GPTMR_EN       => io_gptmr_en_c,
+      IO_ONEWIRE_EN     => IO_ONEWIRE_EN,
+      IO_DMA_EN         => IO_DMA_EN,
+      IO_SLINK_EN       => IO_SLINK_EN,
+      IO_TRACER_EN      => IO_TRACER_EN
+    )
+    port map (
+      clk_i     => clk_i,
+      rstn_i    => rstn_sys,
+      bus_req_i => iodev_req(IODEV_SYSINFO),
+      bus_rsp_o => iodev_rsp(IODEV_SYSINFO)
+    );
 
   end generate;
 
