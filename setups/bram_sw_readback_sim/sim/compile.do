@@ -110,6 +110,15 @@ file mkdir questa_lib
 # This ensures all Xilinx simulation libraries are available
 file copy -force $XILINX_QUESTA_LIBS/modelsim.ini modelsim.ini
 
+# The copied modelsim.ini may contain relative paths (e.g. unisim = ./unisim)
+# which break when the file is in a different directory. Re-map the Xilinx
+# libraries with absolute paths so they resolve correctly from here.
+vmap unisim $XILINX_QUESTA_LIBS/unisim
+vmap unisims_ver $XILINX_QUESTA_LIBS/unisims_ver
+vmap unimacro $XILINX_QUESTA_LIBS/unimacro
+vmap unimacro_ver $XILINX_QUESTA_LIBS/unimacro_ver
+vmap secureip $XILINX_QUESTA_LIBS/secureip
+
 # ================================================================================
 # Run Vivado's generated compile script
 # ================================================================================
@@ -139,9 +148,6 @@ puts "=========================================="
 # Map the libraries created by Vivado's compile script (they're in the questa dir)
 vmap xil_defaultlib $vivado_questa_dir/questa_lib/msim/xil_defaultlib
 vmap neorv32 $vivado_questa_dir/questa_lib/msim/neorv32
-
-# Map UNISIM library from pre-compiled Xilinx libraries (needed for Top.vhd)
-vmap unisim $XILINX_QUESTA_LIBS/unisim
 
 # Compile UART components (need VHDL-2008 for math_real)
 set VCOM_TB_OPTS "-2008 -explicit -work xil_defaultlib"
