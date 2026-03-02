@@ -5,11 +5,12 @@
 # Usage (from Vivado TCL console):
 #   cd {C:/Work/Sandbox/QPSK_Triple_Comparison/deps/neorv32/setups/neorv32_sw_ad9361_datapath_sim}
 #   source build_all.tcl
-#   build_all {C:/Work/Sandbox/QPSK_Triple_Comparison/deps/hdl/library}
+#   build_all
 #
-# Arguments:
-#   adi_ip_dir - Path to ADI IP repository (e.g., deps/hdl/library or
-#                a pre-built adi_fmcomms2_ip/library directory)
+# Environment Variables (required):
+#   ADI_IP_LOCATION - Path to ADI IP library root (e.g., deps/hdl/library)
+#                     Set in ~/.bashrc:
+#                       export ADI_IP_LOCATION=/path/to/deps/hdl/library
 #
 ###############################################################################
 
@@ -102,7 +103,7 @@ proc check_board_files {} {
 # Main build procedure
 ###############################################################################
 
-proc build_all {adi_ip_dir} {
+proc build_all {} {
     # Import global variables
     global project_name part project_dir top_level_bd_name
     global neorv32_cpu ecs_clock_300_mhz cpu_sys_reset neorv32_cpu_input_reset axi_cpu_interconnect
@@ -110,8 +111,27 @@ proc build_all {adi_ip_dir} {
     global axi_ad9361 axi_ad9361_adapter
     global util_ad9361_divclk util_ad9361_divclk_sel util_ad9361_divclk_sel_concat util_ad9361_divclk_reset
 
-    # Normalize and validate ADI IP directory
-    set adi_ip_dir [file normalize $adi_ip_dir]
+    # Read ADI IP directory from environment variable
+    if {![info exists ::env(ADI_IP_LOCATION)]} {
+        puts ""
+        puts "==============================================================================="
+        puts "  ERROR: ADI_IP_LOCATION environment variable not set"
+        puts "==============================================================================="
+        puts ""
+        puts "  Set it to point to the ADI HDL IP library root:"
+        puts ""
+        puts "    Windows: set ADI_IP_LOCATION=C:\\Work\\QPSK_Triple_Comparison\\deps\\hdl\\library"
+        puts "    Linux:   export ADI_IP_LOCATION=/path/to/deps/hdl/library"
+        puts ""
+        puts "  The ADI library IPs must be built first:"
+        puts ""
+        puts "    cd deps/hdl/projects/fmcomms2/kcu105"
+        puts "    make"
+        puts ""
+        puts "==============================================================================="
+        return -1
+    }
+    set adi_ip_dir [file normalize $::env(ADI_IP_LOCATION)]
     if {![file exists $adi_ip_dir]} {
         puts "ERROR: ADI IP directory does not exist: $adi_ip_dir"
         return -1
@@ -233,13 +253,106 @@ if {![file exists $hls_ip_dir]} {
 puts "INFO: Using pre-built HLS IP from: $hls_ip_dir"
 
 # Add NEORV32 IP, ADI IP, and HLS IP to our project's repository paths
+#
+# ADI IPs must be added as individual directories rather than using the parent
+# library/ path. The ADI library/ tree contains ~90 subdirectories, most without
+# a valid component.xml (only built IPs have one). Pointing Vivado at the parent
+# causes the IP catalog scan to fail silently when it encounters the unpackaged
+# directories, resulting in none of the ADI IPs being found.
+#
+# Additionally, Xilinx-specific ADI IPs live under library/xilinx/ (two levels
+# deep), which is beyond Vivado's single-level ip_repo_paths scan depth.
+#
+# Required ADI IPs for this build (from FMCOMMS2 reference design):
+#   - axi_ad9361       (library/axi_ad9361)            - AD9361 transceiver core
+#   - axi_dmac         (library/axi_dmac)              - AXI DMA controller
+#   - axi_sysid        (library/axi_sysid)             - System identification
+#   - sysid_rom        (library/sysid_rom)             - System ID ROM
+#   - util_cdc         (library/util_cdc)              - Clock domain crossing
+#   - util_axis_fifo   (library/util_axis_fifo)        - AXI-Stream FIFO
+#   - util_rfifo       (library/util_rfifo)            - Read FIFO
+#   - util_wfifo       (library/util_wfifo)            - Write FIFO
+#   - util_tdd_sync    (library/util_tdd_sync)         - TDD synchronization
+#   - util_cpack2      (library/util_pack/util_cpack2) - Channel pack
+#   - util_upack2      (library/util_pack/util_upack2) - Channel unpack
+#   - util_clkdiv      (library/xilinx/util_clkdiv)    - Clock divider
 puts "INFO: Adding NEORV32 IP, ADI IP, and HLS IP to repository..."
+
+# ADI IP directories that contain component.xml directly
+set adi_direct_ips [list \
+    axi_ad9361 \
+    axi_dmac \
+    axi_sysid \
+    sysid_rom \
+    util_cdc \
+    util_axis_fifo \
+    util_rfifo \
+    util_wfifo \
+    util_tdd_sync \
+]
+
+# ADI IP parent directories scanned one level deep by Vivado
+# (covers IPs nested two levels below library/)
+set adi_scan_dirs [list \
+    "$adi_ip_dir/util_pack" \
+    "$adi_ip_dir/xilinx" \
+]
+
+# Validate that all required ADI IPs are packaged (component.xml exists)
+foreach ip $adi_direct_ips {
+    if {![file exists "$adi_ip_dir/$ip/component.xml"]} {
+        puts ""
+        puts "==============================================================================="
+        puts "  ERROR: ADI $ip IP not packaged"
+        puts "==============================================================================="
+        puts ""
+        puts "  Expected: $adi_ip_dir/$ip/component.xml"
+        puts ""
+        puts "  The ADI library IPs must be built before this project."
+        puts "  Build the FMCOMMS2 reference design to package all required IPs:"
+        puts ""
+        puts "    cd deps/hdl/projects/fmcomms2/kcu105"
+        puts "    make"
+        puts ""
+        puts "==============================================================================="
+        return -1
+    }
+}
+
+# Validate scan directories exist
+foreach scan_dir $adi_scan_dirs {
+    if {![file isdirectory $scan_dir]} {
+        puts ""
+        puts "==============================================================================="
+        puts "  ERROR: ADI IP directory not found: $scan_dir"
+        puts "==============================================================================="
+        puts ""
+        puts "  Build the FMCOMMS2 reference design to package all required IPs:"
+        puts ""
+        puts "    cd deps/hdl/projects/fmcomms2/kcu105"
+        puts "    make"
+        puts ""
+        puts "==============================================================================="
+        return -1
+    }
+}
+
 set current_ip_paths [get_property ip_repo_paths [current_project]]
 lappend current_ip_paths "$neorv32_ip_output_dir/packaged_ip"
-lappend current_ip_paths $adi_ip_dir
+foreach ip $adi_direct_ips {
+    lappend current_ip_paths "$adi_ip_dir/$ip"
+}
+foreach scan_dir $adi_scan_dirs {
+    lappend current_ip_paths $scan_dir
+}
 lappend current_ip_paths $hls_ip_dir
 set_property ip_repo_paths $current_ip_paths [current_project]
 update_ip_catalog -rebuild
+
+puts "INFO: IP repo paths:"
+foreach p [get_property ip_repo_paths [current_project]] {
+    puts "  $p"
+}
 
 # Reopen the block design
 open_bd_design ./$project_name.srcs/$synth_sources_name/bd/$top_level_bd_name/$top_level_bd_name.bd
@@ -787,8 +900,8 @@ puts "==========================================================================
 puts "  build_all.tcl loaded successfully"
 puts "==============================================================================="
 puts ""
-puts "  Usage: build_all \"<path_to_adi_ip_library>\""
+puts "  Usage: build_all"
 puts ""
-puts "  Example:"
-puts "    build_all \"C:/Work/Sandbox/QPSK_Triple_Comparison/deps/hdl/library\""
+puts "  Requires ADI_IP_LOCATION environment variable to be set:"
+puts "    export ADI_IP_LOCATION=/path/to/deps/hdl/library"
 puts ""
