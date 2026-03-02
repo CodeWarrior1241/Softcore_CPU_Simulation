@@ -134,8 +134,9 @@ set bin_path [file dirname [exec which vsim]]
 
 do compile.do
 
-# Return to our sim directory
-cd $sim_dir
+# Stay in $vivado_questa_dir for all remaining compilation — the modelsim.ini
+# with Xilinx library mappings lives here. All source file paths use $sim_dir
+# (absolute) so directory does not matter for finding sources.
 
 # ================================================================================
 # Compile Additional Testbench Components
