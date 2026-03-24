@@ -1,5 +1,4 @@
-# Application makefile for AD9361 no-os skeleton.
-# Use this makefile to configure all relevant CPU / compiler options.
+# Application makefile for AD9361 no-os driver on NEORV32 + FMCOMMS2/4 AU15P.
 
 # Override the default CPU ISA (M extension for hardware multiply, C for code density)
 MARCH = rv32imc_zicsr_zifencei
@@ -10,11 +9,39 @@ EFFORT = -Os
 # Add extended debug symbols
 USER_FLAGS += -ggdb -gdwarf-3
 
-# Adjust processor IMEM size (64KB for AD9361 driver)
-USER_FLAGS += -Wl,--defsym,__neorv32_rom_size=64k
+# Adjust processor IMEM size (128KB — AD9361 driver overflows 64KB by ~17KB)
+USER_FLAGS += -Wl,--defsym,__neorv32_rom_size=128k
 
 # Adjust processor DMEM size (16KB available)
 USER_FLAGS += -Wl,--defsym,__neorv32_ram_size=16k
+
+# Heap for AD9361 driver allocations (ad9361_rf_phy, clocks, descriptors)
+USER_FLAGS += -Wl,--defsym,__neorv32_heap_size=4k
+
+# Exclude no-os AXI ADC/DAC drivers (axi_ad9361 is programmed separately)
+USER_FLAGS += -DAXI_ADC_NOT_PRESENT
+
+# ---------- no-os paths ----------
+NOOS_HOME  ?= ../../../no-OS
+AD9361_DRV  = $(NOOS_HOME)/drivers/rf-transceiver/ad9361
+
+# ---------- no-os sources ----------
+APP_SRC += $(wildcard ./*.c)
+APP_SRC += $(AD9361_DRV)/ad9361.c
+APP_SRC += $(AD9361_DRV)/ad9361_api.c
+APP_SRC += $(AD9361_DRV)/ad9361_util.c
+APP_SRC += $(AD9361_DRV)/ad9361_conv.c
+APP_SRC += $(NOOS_HOME)/drivers/api/no_os_spi.c
+APP_SRC += $(NOOS_HOME)/drivers/api/no_os_gpio.c
+APP_SRC += $(NOOS_HOME)/util/no_os_util.c
+APP_SRC += $(NOOS_HOME)/util/no_os_clk.c
+
+# ---------- no-os include paths ----------
+APP_INC += -I .
+APP_INC += -I $(NOOS_HOME)/include
+APP_INC += -I $(AD9361_DRV)
+APP_INC += -I $(NOOS_HOME)/drivers/axi_core/axi_adc_core
+APP_INC += -I $(NOOS_HOME)/drivers/axi_core/axi_dac_core
 
 # Set path to NEORV32 root directory
 NEORV32_HOME ?= ../..
