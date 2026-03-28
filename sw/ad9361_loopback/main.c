@@ -6,145 +6,161 @@
 
 /**
  * @file ad9361_loopback/main.c
- * @brief AD9361 datapath loopback test status monitor.
+ * @brief AD9361 datapath loopback test with streaming adapter bridge.
  *
- * This application initializes the AD9361 control signals and monitors
- * the datapath status. The actual loopback test is performed in hardware:
- *   - Testbench feeds COE data into LVDS RX
- *   - Data flows through ADC FIFO -> cpack2 -> upack2 -> DAC FIFO
- *   - Testbench loops TX output back to RX input
+ * Hardware datapath:
+ *   COE data -> LVDS RX -> axi_ad9361 -> axi_ad9361_adapter (125 MHz l_clk)
+ *     -> RX CDC FIFO -> axi_streaming_adapter (100 MHz AXI)
+ *   axi_streaming_adapter -> TX CDC FIFO -> axi_ad9361_adapter -> axi_ad9361 -> LVDS TX
  *
- * The CPU's role is to:
- *   1. Enable TX and RX via GPIO (up_enable, up_txnrx)
- *   2. Print status messages to UART
- *   3. Optionally read axi_ad9361 status registers
+ * With loopback enabled in the adapter, RX data is internally routed to TX.
+ * The testbench loops the LVDS TX output back to LVDS RX input.
+ *
+ * The CPU:
+ *   1. Starts the streaming adapter bridge (ap_ctrl_chain)
+ *   2. Enables the adapter (ctrl, channel enables, loopback)
+ *   3. Enables AD9361 TX/RX via GPIO (up_enable, up_txnrx)
+ *   4. Waits for RX_READY, reads back 1024 samples, verifies, releases
+ *   5. Repeats readback cycles to confirm continuous data flow
  */
 
 #include <neorv32.h>
+#include "axi_streaming_adapter_ctrl.h"
 
 /**********************************************************************//**
  * @name User configuration
  **************************************************************************/
 /**@{*/
-/** UART BAUD rate */
 #define BAUD_RATE 115200
 
-/** GPIO pin assignments for AD9361 control */
 #define GPIO_UP_ENABLE_PIN  0   // GPIO[0] = up_enable
-#define GPIO_UP_TXNRX_PIN   1   // GPIO[1] = up_txnrx
+#define GPIO_UP_TXNRX_PIN  1   // GPIO[1] = up_txnrx
 
-/** AXI AD9361 base address */
-#define AXI_AD9361_BASE 0x44A00000UL
+/** Number of RX readback cycles to perform before declaring success */
+#define NUM_READBACK_CYCLES 3
 
-/** Status polling interval (cycles between status checks) */
-#define STATUS_POLL_INTERVAL 10000000
+/** Timeout: max polling iterations waiting for RX_READY */
+#define RX_READY_TIMEOUT 500000
 /**@}*/
 
 
-/**********************************************************************//**
- * @name AXI AD9361 Register Offsets
- * See: https://wiki.analog.com/resources/fpga/docs/axi_ad9361
- **************************************************************************/
-/**@{*/
-#define AD9361_REG_VERSION      0x0000  // Core version
-#define AD9361_REG_ID           0x0004  // Core ID
-#define AD9361_REG_SCRATCH      0x0008  // Scratch register
-#define AD9361_REG_STATUS       0x005C  // Status register
-#define AD9361_REG_ADC_STATUS   0x0080  // ADC interface status
-#define AD9361_REG_DAC_STATUS   0x0180  // DAC interface status
-/**@}*/
-
 
 /**********************************************************************//**
- * Read a 32-bit register from AXI AD9361.
+ * Wait for bridge RX_READY flag.
  *
- * @param[in] offset Register offset from base address.
- * @return Register value.
+ * @return 1 on success, 0 on timeout.
  **************************************************************************/
-static uint32_t ad9361_read_reg(uint32_t offset) {
-  volatile uint32_t *reg = (volatile uint32_t *)(AXI_AD9361_BASE + offset);
-  return *reg;
+static int wait_rx_ready(void) {
+  for (int i = 0; i < RX_READY_TIMEOUT; i++) {
+    uint32_t bs = BRIDGE_REG(BRIDGE_REG_BRIDGE_STATUS);
+    if (bs & BRIDGE_STATUS_RX_READY) {
+      return 1;
+    }
+  }
+  return 0;
 }
 
 
 /**********************************************************************//**
- * Main function: initialize hardware and run status monitor loop.
- *
- * @return Will never return.
+ * Read back 1024 RX samples and print a summary.
+ * Returns the number of non-zero samples seen.
+ **************************************************************************/
+static int readback_rx(int cycle) {
+  int nonzero = 0;
+  uint32_t first = 0, last = 0;
+
+  for (int i = 0; i < BRIDGE_SAMPLE_DEPTH; i++) {
+    uint32_t sample = bridge_read_rx_sample(i);
+    if (sample != 0) nonzero++;
+    if (i == 0) first = sample;
+    if (i == BRIDGE_SAMPLE_DEPTH - 1) last = sample;
+  }
+
+  neorv32_uart0_printf("  Cycle %d: %d non-zero samples, first=0x%x last=0x%x\n",
+                       cycle, nonzero, first, last);
+  return nonzero;
+}
+
+
+/**********************************************************************//**
+ * Main function
  **************************************************************************/
 int main(void) {
 
-  uint32_t version, core_id, status;
-  int iteration = 0;
-
-  // Capture all exceptions and give debug info via UART
   neorv32_rte_setup();
 
-  // Check if UART0 is available
-  if (neorv32_uart0_available() == 0) {
-    return 1; // UART not available
-  }
+  if (neorv32_uart0_available() == 0) return 1;
+  if (neorv32_gpio_available() == 0) return 1;
 
-  // Check if GPIO is available
-  if (neorv32_gpio_available() == 0) {
-    return 1; // GPIO not available
-  }
-
-  // Setup UART0 at 115200 baud, no interrupts
   neorv32_uart0_setup(BAUD_RATE, 0);
 
-  // Print startup banner
-  neorv32_uart0_puts("\n");
-  neorv32_uart0_puts("==============================================\n");
-  neorv32_uart0_puts("  AD9361 Datapath Loopback Test\n");
-  neorv32_uart0_puts("  NEORV32 Status Monitor\n");
-  neorv32_uart0_puts("==============================================\n");
-  neorv32_uart0_puts("\n");
+  neorv32_uart0_puts("\nAD9361 Loopback\n");
 
-  // Read and display AXI AD9361 core info
-  version = ad9361_read_reg(AD9361_REG_VERSION);
-  core_id = ad9361_read_reg(AD9361_REG_ID);
+  // Start streaming adapter bridge (ap_ctrl_chain)
+  bridge_start();
 
-  neorv32_uart0_puts("AXI AD9361 Core Info:\n");
-  neorv32_uart0_printf("  Version: 0x%x\n", version);
-  neorv32_uart0_printf("  Core ID: 0x%x\n", core_id);
-  neorv32_uart0_puts("\n");
+  // Configure adapter: all channels, loopback, enable
+  BRIDGE_REG(BRIDGE_REG_RX_CTRL) = BRIDGE_CH_EN_ALL;
+  BRIDGE_REG(BRIDGE_REG_TX_CTRL) = BRIDGE_CH_EN_ALL;
+  BRIDGE_REG(BRIDGE_REG_LOOPBACK) = 1;
+  BRIDGE_REG(BRIDGE_REG_CTRL) = BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_RX_ENABLE | BRIDGE_CTRL_TX_ENABLE;
 
-  // Enable AD9361 TX and RX via GPIO
-  neorv32_uart0_puts("Enabling AD9361 TX/RX...\n");
-
-  // Set up_enable = 1 (GPIO[0])
+  // Enable AD9361 TX/RX via GPIO
   neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 1);
-
-  // Set up_txnrx = 1 for TX/RX mode (GPIO[1])
   neorv32_gpio_pin_set(GPIO_UP_TXNRX_PIN, 1);
 
-  neorv32_uart0_puts("  up_enable = 1\n");
-  neorv32_uart0_puts("  up_txnrx  = 1\n");
-  neorv32_uart0_puts("\n");
+  // ==================================================================
+  // Phase 1: TX send — load 1024 samples and trigger burst
+  // ==================================================================
 
-  neorv32_uart0_puts("Datapath loopback test running...\n");
-  neorv32_uart0_puts("  COE data -> LVDS RX -> ADC -> cpack2 -> upack2 -> DAC -> LVDS TX\n");
-  neorv32_uart0_puts("  Testbench loops TX back to RX\n");
-  neorv32_uart0_puts("\n");
+  // Write known pattern to TX buffer: I = index, Q = index + 0x1000
+  volatile uint32_t *tx_buf = (volatile uint32_t *)(AXI_STREAMING_ADAPTER_BASE + BRIDGE_TX_DATA_BASE);
+  for (int i = 0; i < BRIDGE_SAMPLE_DEPTH; i++) {
+    uint32_t sample = ((uint32_t)(i + 0x1000) << 16) | (i & 0xFFFF);
+    tx_buf[i] = sample;
+  }
 
-  // Main monitoring loop
-  while (1) {
-    // Wait for polling interval
-    for (volatile int i = 0; i < STATUS_POLL_INTERVAL; i++) {
-      // Busy wait
+  // Trigger TX burst and wait for completion
+  bridge_trigger_tx(BRIDGE_SAMPLE_DEPTH);
+  for (int i = 0; i < RX_READY_TIMEOUT; i++) {
+    if (BRIDGE_REG(BRIDGE_REG_TX_COUNT_O) == 0) break;
+  }
+  neorv32_uart0_puts("TX ok\n");
+
+  // RX readback cycles: wait for data, read, verify, release
+  int pass_count = 0;
+
+  for (int cycle = 0; cycle < NUM_READBACK_CYCLES; cycle++) {
+
+    if (!wait_rx_ready()) {
+      neorv32_uart0_printf("C%d:TMO\n", cycle);
+      continue;
     }
 
-    // Read status registers
-    status = ad9361_read_reg(AD9361_REG_STATUS);
+    int nonzero = readback_rx(cycle);
 
-    // Print periodic status update
-    iteration++;
-    neorv32_uart0_printf("[%d] Status: 0x%x\n", iteration, status);
+    if (nonzero > 0) {
+      pass_count++;
+    } else {
+      neorv32_uart0_printf("C%d:FAIL\n", cycle);
+    }
 
-    // Check for specific conditions (optional)
-    // The actual pass/fail determination is done by the testbench
-    // by comparing TX and RX data
+    bridge_release_rx();
+
+    // Brief delay for next burst to arrive
+    for (volatile int i = 0; i < 10000; i++) {}
+  }
+
+  // Results
+  if (pass_count == NUM_READBACK_CYCLES) {
+    neorv32_uart0_puts("PASS\n");
+  } else {
+    neorv32_uart0_printf("FAIL %d/%d\n", pass_count, NUM_READBACK_CYCLES);
+  }
+
+  // Continue monitoring
+  while (1) {
+    for (volatile int i = 0; i < 500000; i++) {}
   }
 
   return 0;

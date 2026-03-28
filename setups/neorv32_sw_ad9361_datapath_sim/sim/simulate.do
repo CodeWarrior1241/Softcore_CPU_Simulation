@@ -14,7 +14,7 @@ do compile.do
 
 # Default simulation time (can be overridden from command line)
 if {![info exists SIM_TIME]} {
-    set SIM_TIME "10ms"
+    set SIM_TIME "50ms"
 }
 
 puts "=========================================="
@@ -41,9 +41,9 @@ vmap axi_register_slice_v2_1_36 $vivado_questa_dir/questa_lib/msim/axi_register_
 vmap axi_vip_v1_1_22 $vivado_questa_dir/questa_lib/msim/axi_vip_v1_1_22
 vmap blk_mem_gen_v8_4_12 $vivado_questa_dir/questa_lib/msim/blk_mem_gen_v8_4_12
 vmap xlslice_v1_0_5 $vivado_questa_dir/questa_lib/msim/xlslice_v1_0_5
-vmap xlconcat_v2_1_7 $vivado_questa_dir/questa_lib/msim/xlconcat_v2_1_7
-vmap util_reduced_logic_v2_0_7 $vivado_questa_dir/questa_lib/msim/util_reduced_logic_v2_0_7
 vmap xlconstant_v1_1_10 $vivado_questa_dir/questa_lib/msim/xlconstant_v1_1_10
+vmap axis_infrastructure_v1_1_1 $vivado_questa_dir/questa_lib/msim/axis_infrastructure_v1_1_1
+vmap axis_data_fifo_v2_0_17 $vivado_questa_dir/questa_lib/msim/axis_data_fifo_v2_0_17
 
 # ================================================================================
 # Elaborate and Load Design
@@ -72,9 +72,9 @@ vopt -l elaborate.log +acc=npr -suppress 10016 \
     -L axi_bram_ctrl_v4_1_13 \
     -L blk_mem_gen_v8_4_12 \
     -L xlslice_v1_0_5 \
-    -L xlconcat_v2_1_7 \
-    -L util_reduced_logic_v2_0_7 \
     -L xlconstant_v1_1_10 \
+    -L axis_infrastructure_v1_1_1 \
+    -L axis_data_fifo_v2_0_17 \
     -L unisims_ver \
     -L unimacro_ver \
     -L secureip \
@@ -141,11 +141,80 @@ catch {
     add wave -hex /vivado_tb/dut/Top_i/NEORV32_RISC_V/gpio_o
 }
 
+add wave -divider "UUT Internal - AD9361 Adapter (125 MHz l_clk)"
+catch {
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/ap_clk
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/ap_rst_n
+}
+
+add wave -divider "UUT Internal - AD9361 Adapter ADC"
+catch {
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/adc_data_i0
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/adc_data_q0
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/adc_valid_i0
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/adc_enable_i0
+}
+
+add wave -divider "UUT Internal - AD9361 Adapter DAC"
+catch {
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/dac_data_i0
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/dac_data_q0
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/dac_valid_i0
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/dac_enable_i0
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/dac_dunf
+}
+
+add wave -divider "UUT Internal - AD9361 Adapter Control (ap_none)"
+catch {
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/ctrl_in
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/loopback_in
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/status_out
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/rx_fill_out
+}
+
+add wave -divider "UUT Internal - AD9361 Adapter AXI-Stream"
+catch {
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/tx_stream_TDATA
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/tx_stream_TVALID
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/tx_stream_TREADY
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/tx_stream_TLAST
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/rx_stream_TDATA
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/rx_stream_TVALID
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/rx_stream_TREADY
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/rx_stream_TLAST
+}
+
+add wave -divider "UUT Internal - TX CDC FIFO"
+catch {
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_tx_streaming_fifo/s_axis_aclk
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_tx_streaming_fifo/m_axis_aclk
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_tx_streaming_fifo/s_axis_tvalid
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_tx_streaming_fifo/s_axis_tready
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_tx_streaming_fifo/m_axis_tvalid
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_tx_streaming_fifo/m_axis_tready
+}
+
+add wave -divider "UUT Internal - RX CDC FIFO"
+catch {
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_rx_streaming_fifo/s_axis_aclk
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_rx_streaming_fifo/m_axis_aclk
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_rx_streaming_fifo/s_axis_tvalid
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_rx_streaming_fifo/s_axis_tready
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_rx_streaming_fifo/m_axis_tvalid
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_rx_streaming_fifo/m_axis_tready
+}
+
+add wave -divider "UUT Internal - Streaming Adapter (100 MHz)"
+catch {
+    add wave -hex /vivado_tb/dut/Top_i/axi_streaming_adapter/ap_clk
+    add wave -hex /vivado_tb/dut/Top_i/axi_streaming_adapter/ap_rst_n
+}
+
 # ================================================================================
 # Configure Waveform Display
 # ================================================================================
 
-configure wave -namecolwidth 350
+configure wave -namecolwidth 400
 configure wave -valuecolwidth 120
 configure wave -signalnamewidth 1
 

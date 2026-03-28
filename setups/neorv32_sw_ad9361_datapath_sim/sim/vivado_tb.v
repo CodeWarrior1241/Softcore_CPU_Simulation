@@ -16,27 +16,42 @@
 //  +------------------------------------------------------------------------+
 //  |           DUT (Top_wrapper / FPGA Design)                              |
 //  |                                                                        |
+//  |  300MHz ECS     +-------------+                                        |
+//  |  diff clk ----->| clk_wiz     |---> 100 MHz (AXI bus, CPU)            |
+//  |                 +-------------+---> 300 MHz (IODELAY ref)              |
+//  |                                                                        |
 //  |  LVDS RX        +-------------+         +-------------+    LVDS TX     |
 //  |  ------+------->| axi_ad9361  |         | axi_ad9361  |-----+------>   |
 //  |  clk   |        | ADC Section |         | DAC Section |     |          |
 //  |  frame |        +------+------+         +------+------+     | clk      |
-//  |  data  |               |                       ^            | frame    |
-//  |                        v                       |            | data     |
-//  |                 +-------------+         +-------------+                |
-//  |                 | util_wfifo  |         | util_rfifo  |                |
-//  |                 | (ADC FIFO)  |         | (DAC FIFO)  |                |
-//  |                 +------+------+         +------+------+                |
-//  |                        |                       ^                       |
+//  |  data  |           l_clk|                      ^            | frame    |
+//  |                  (125   |MHz)                   |            | data     |
 //  |                        v                       |                       |
-//  |                 +-------------+         +-------------+                |
-//  |                 | util_cpack2 |-------->| util_upack2 |                |
-//  |                 | (pack 4ch)  | 64-bit  | (unpack 4ch)|                |
-//  |                 +-------------+ data    +-------------+                |
-//  |                                                                        |
-//  |  +-------------+                                                       |
-//  |  | NEORV32 CPU |---> UART TX (status monitoring)                       |
-//  |  | (control)   |---> GPIO (up_enable, up_txnrx)                        |
-//  |  +-------------+                                                       |
+//  |                 +-------------------------------+------+               |
+//  |                 |      axi_ad9361_adapter (HLS, v4.0)  |               |
+//  |                 |      ap_clk = l_clk (125 MHz)        |               |
+//  |                 |      ctrl/status = ap_none wires     |               |
+//  |                 |      tx/rx_stream = AXI-Stream       |               |
+//  |                 +--------+-----------------------+-----+               |
+//  |                    tx_stream                rx_stream                   |
+//  |                        |                       ^                       |
+//  |                 +------v------+         +------+------+                |
+//  |                 | TX CDC FIFO |         | RX CDC FIFO |                |
+//  |                 | 100->125MHz |         | 125->100MHz |                |
+//  |                 +------+------+         +------+------+                |
+//  |                        ^                       |                       |
+//  |                 +------+-----------------------+------+                |
+//  |                 |  axi_streaming_adapter (HLS, v1.0)  |                |
+//  |                 |  ap_clk = 100 MHz (AXI)             |                |
+//  |                 |  s_axi_ctrl = AXI-Lite (CPU)        |                |
+//  |                 |  tx_data[1024], rx_data[1024]        |                |
+//  |                 +-------------------------------------+                |
+//  |                        ^                                               |
+//  |                        | AXI-Lite (100 MHz)                            |
+//  |  +-------------+------+                                                |
+//  |  | NEORV32 CPU |---> UART TX (status + verification)                   |
+//  |  | (100 MHz)   |---> GPIO (up_enable, up_txnrx)                        |
+//  |  +-------------+---> AXI (BRAM, axi_ad9361, streaming_adapter)         |
 //  |                                                                        |
 //  +------------------------------------------------------------------------+
 //
@@ -45,13 +60,18 @@
 //------------------------------------------------------------------------------
 //
 //  1. Reset held for 1ms (PLL lock and initialization)
-//  2. PLL locks, clocks stable
-//  3. CPU enables AD9361 via GPIO (up_enable=1, up_txnrx=1)
-//  4. Testbench feeds COE data into LVDS RX (looped)
-//  5. Data flows: RX -> ADC FIFO -> cpack2 -> upack2 -> DAC FIFO -> TX
-//  6. After 2 full COE loops, testbench switches to TX->RX loopback mode
-//  7. Data now circulates: TX -> loopback -> RX -> ... -> TX
-//  8. Simulation runs for 50ms total
+//  2. PLL locks, 100 MHz and 300 MHz clocks stable
+//  3. CPU starts streaming adapter bridge (ap_ctrl_chain)
+//  4. CPU configures adapter: channels, loopback, enable
+//  5. CPU enables AD9361 via GPIO (up_enable=1, up_txnrx=1)
+//  6. Testbench feeds COE data into LVDS RX at 125 MHz (looped)
+//  7. axi_ad9361 recovers l_clk, deserializes LVDS to ADC channels
+//  8. axi_ad9361_adapter captures ADC into AXI-Stream (l_clk domain)
+//  9. RX CDC FIFO crosses to 100 MHz domain
+// 10. Streaming adapter stores 1024 samples in rx_data[] for CPU readback
+// 11. CPU reads rx_data[], verifies, releases slot, repeats
+// 12. After 2 COE loops, testbench switches to TX->RX loopback mode
+// 13. Simulation runs for 50ms total
 //
 //------------------------------------------------------------------------------
 
@@ -65,7 +85,7 @@ module vivado_tb;
 
     // Clock periods
     parameter real ECS_CLK_PERIOD_NS = 3.333;    // 300 MHz input clock
-    parameter real AD9361_CLK_PERIOD_NS = 8.0;   // 125 MHz AD9361 data clock
+    parameter real AD9361_CLK_PERIOD_NS = 8.0;    // 125 MHz AD9361 data clock
 
     // Simulation timing
     parameter RESET_HOLD_NS = 1_000_000;         // 1ms reset hold for PLL lock
