@@ -42,11 +42,15 @@ variable qpsk_snapshot_bram "QPSK_Snapshot_BRAM"
 variable axi_ad9361 "axi_ad9361"
 variable axi_ad9361_adapter "axi_ad9361_adapter"
 
-# Clock divider logic for AD9361 sampling clock
-variable util_ad9361_divclk "util_ad9361_divclk"
-variable util_ad9361_divclk_sel "util_ad9361_divclk_sel"
-variable util_ad9361_divclk_sel_concat "util_ad9361_divclk_sel_concat"
-variable util_ad9361_divclk_reset "util_ad9361_divclk_reset"
+# AXI-Lite to Streaming adapter bridge (100 MHz domain)
+variable axi_streaming_adapter "axi_streaming_adapter"
+
+# AXI-Stream CDC FIFOs (100 MHz <-> 125 MHz l_clk)
+variable ad9361_cdc_tx_streaming_fifo "ad9361_cdc_tx_streaming_fifo"
+variable ad9361_cdc_rx_streaming_fifo "ad9361_cdc_rx_streaming_fifo"
+
+# Reset synchronizer for AD9361 l_clk domain
+variable util_ad9361_lclk_reset "util_ad9361_lclk_reset"
 
 ###############################################################################
 # Board file check and installation instructions
@@ -109,7 +113,9 @@ proc build_all {} {
     global neorv32_cpu ecs_clock_300_mhz cpu_sys_reset neorv32_cpu_input_reset axi_cpu_interconnect
     global axi_bram_controller qpsk_snapshot_bram
     global axi_ad9361 axi_ad9361_adapter
-    global util_ad9361_divclk util_ad9361_divclk_sel util_ad9361_divclk_sel_concat util_ad9361_divclk_reset
+    global axi_streaming_adapter
+    global ad9361_cdc_tx_streaming_fifo ad9361_cdc_rx_streaming_fifo
+    global util_ad9361_lclk_reset
 
     # Read ADI IP directory from environment variable
     if {![info exists ::env(ADI_IP_LOCATION)]} {
@@ -252,6 +258,15 @@ if {![file exists $hls_ip_dir]} {
 }
 puts "INFO: Using pre-built HLS IP from: $hls_ip_dir"
 
+set hls_streaming_adapter_ip_dir [file normalize "$project_dir/../../../../src/axi_lite_to_streaming_adapter/axi_lite_to_streaming_adapter/hls/impl/ip"]
+
+if {![file exists $hls_streaming_adapter_ip_dir]} {
+    puts "ERROR: HLS IP directory not found: $hls_streaming_adapter_ip_dir"
+    puts "       Please build the AXI-Lite to Streaming Adapter HLS IP first using Vitis HLS."
+    return -1
+}
+puts "INFO: Using pre-built AXI-Lite to Streaming Adapter HLS IP from: $hls_streaming_adapter_ip_dir"
+
 # Add NEORV32 IP, ADI IP, and HLS IP to our project's repository paths
 #
 # ADI IPs must be added as individual directories rather than using the parent
@@ -263,19 +278,16 @@ puts "INFO: Using pre-built HLS IP from: $hls_ip_dir"
 # Additionally, Xilinx-specific ADI IPs live under library/xilinx/ (two levels
 # deep), which is beyond Vivado's single-level ip_repo_paths scan depth.
 #
-# Required ADI IPs for this build (from FMCOMMS2 reference design):
+# Required ADI IPs for this build:
 #   - axi_ad9361       (library/axi_ad9361)            - AD9361 transceiver core
-#   - axi_dmac         (library/axi_dmac)              - AXI DMA controller
+#   - axi_dmac         (library/axi_dmac)              - AXI DMA controller (axi_ad9361 dependency)
 #   - axi_sysid        (library/axi_sysid)             - System identification
 #   - sysid_rom        (library/sysid_rom)             - System ID ROM
-#   - util_cdc         (library/util_cdc)              - Clock domain crossing
-#   - util_axis_fifo   (library/util_axis_fifo)        - AXI-Stream FIFO
-#   - util_rfifo       (library/util_rfifo)            - Read FIFO
-#   - util_wfifo       (library/util_wfifo)            - Write FIFO
-#   - util_tdd_sync    (library/util_tdd_sync)         - TDD synchronization
-#   - util_cpack2      (library/util_pack/util_cpack2) - Channel pack
-#   - util_upack2      (library/util_pack/util_upack2) - Channel unpack
-#   - util_clkdiv      (library/xilinx/util_clkdiv)    - Clock divider
+#   - util_cdc         (library/util_cdc)              - Clock domain crossing (axi_ad9361 dependency)
+#   - util_axis_fifo   (library/util_axis_fifo)        - AXI-Stream FIFO (axi_ad9361 dependency)
+#   - util_rfifo       (library/util_rfifo)            - Read FIFO (axi_ad9361 dependency)
+#   - util_wfifo       (library/util_wfifo)            - Write FIFO (axi_ad9361 dependency)
+#   - util_tdd_sync    (library/util_tdd_sync)         - TDD synchronization (axi_ad9361 dependency)
 puts "INFO: Adding NEORV32 IP, ADI IP, and HLS IP to repository..."
 
 # ADI IP directories that contain component.xml directly
@@ -293,9 +305,9 @@ set adi_direct_ips [list \
 
 # ADI IP parent directories scanned one level deep by Vivado
 # (covers IPs nested two levels below library/)
+# Note: util_pack and xilinx dirs removed — util_cpack2/util_upack2/util_clkdiv
+# are no longer used (replaced by HLS adapter)
 set adi_scan_dirs [list \
-    "$adi_ip_dir/util_pack" \
-    "$adi_ip_dir/xilinx" \
 ]
 
 # Validate that all required ADI IPs are packaged (component.xml exists)
@@ -346,6 +358,7 @@ foreach scan_dir $adi_scan_dirs {
     lappend current_ip_paths $scan_dir
 }
 lappend current_ip_paths $hls_ip_dir
+lappend current_ip_paths $hls_streaming_adapter_ip_dir
 set_property ip_repo_paths $current_ip_paths [current_project]
 update_ip_catalog -rebuild
 
@@ -470,7 +483,7 @@ startgroup
 endgroup
 
 # Create the main AXI CPU interconnect
-# NUM_MI = 3: BRAM controller, axi_ad9361, axi_ad9361_adapter
+# NUM_MI = 3: BRAM controller, axi_ad9361, axi_streaming_adapter
 create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 $axi_cpu_interconnect
 set_property -dict [list \
     CONFIG.NUM_MI {3} \
@@ -582,32 +595,15 @@ connect_bd_net [get_bd_pins gpio_up_enable_slice/Dout] [get_bd_pins $axi_ad9361/
 connect_bd_net [get_bd_pins gpio_up_txnrx_slice/Dout] [get_bd_pins $axi_ad9361/up_txnrx]
 
 ###############################################################################
-# Clock Divider Logic for AD9361 Sampling Clock
-# Interface runs at 4x in 2r2t mode, and 2x in 1r1t mode
+# Reset Synchronizer for AD9361 l_clk Domain
 ###############################################################################
 
-puts "INFO: Creating AD9361 clock divider logic..."
+puts "INFO: Creating l_clk domain reset synchronizer..."
 
-# Mode selection concatenation
-create_bd_cell -type ip -vlnv xilinx.com:ip:xlconcat:2.1 $util_ad9361_divclk_sel_concat
-set_property CONFIG.NUM_PORTS {2} [get_bd_cells $util_ad9361_divclk_sel_concat]
-connect_bd_net [get_bd_pins $axi_ad9361/adc_r1_mode] [get_bd_pins $util_ad9361_divclk_sel_concat/In0]
-connect_bd_net [get_bd_pins $axi_ad9361/dac_r1_mode] [get_bd_pins $util_ad9361_divclk_sel_concat/In1]
-
-# Reduced logic for clock selection
-create_bd_cell -type ip -vlnv xilinx.com:ip:util_reduced_logic:2.0 $util_ad9361_divclk_sel
-set_property CONFIG.C_SIZE {2} [get_bd_cells $util_ad9361_divclk_sel]
-connect_bd_net [get_bd_pins $util_ad9361_divclk_sel_concat/dout] [get_bd_pins $util_ad9361_divclk_sel/Op1]
-
-# Clock divider (ADI IP)
-create_bd_cell -type ip -vlnv analog.com:user:util_clkdiv:1.0 $util_ad9361_divclk
-connect_bd_net [get_bd_pins $util_ad9361_divclk_sel/Res] [get_bd_pins $util_ad9361_divclk/clk_sel]
-connect_bd_net [get_bd_pins $axi_ad9361/l_clk] [get_bd_pins $util_ad9361_divclk/clk]
-
-# Reset synchronizer for divided clock domain
-create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 $util_ad9361_divclk_reset
-connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins $util_ad9361_divclk_reset/ext_reset_in]
-connect_bd_net [get_bd_pins $util_ad9361_divclk/clk_out] [get_bd_pins $util_ad9361_divclk_reset/slowest_sync_clk]
+# Reset synchronizer for l_clk domain (used by HLS adapter datapath)
+create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 $util_ad9361_lclk_reset
+connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins $util_ad9361_lclk_reset/ext_reset_in]
+connect_bd_net [get_bd_pins $axi_ad9361/l_clk] [get_bd_pins $util_ad9361_lclk_reset/slowest_sync_clk]
 
 ###############################################################################
 # AXI AD9361 Adapter (HLS IP)
@@ -619,11 +615,11 @@ connect_bd_net [get_bd_pins $util_ad9361_divclk/clk_out] [get_bd_pins $util_ad93
 puts "INFO: Instantiating AXI AD9361 Adapter..."
 
 # Create the HLS adapter IP
-create_bd_cell -type ip -vlnv user:hls:axi_ad9361_adapter:3.0 $axi_ad9361_adapter
+create_bd_cell -type ip -vlnv user:hls:axi_ad9361_adapter:4.0 $axi_ad9361_adapter
 
-# Connect adapter clock and reset (uses AXI clock domain)
-connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1] [get_bd_pins $axi_ad9361_adapter/ap_clk]
-connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins $axi_ad9361_adapter/ap_rst_n]
+# Connect adapter clock and reset (l_clk domain, 125 MHz)
+connect_bd_net [get_bd_pins $axi_ad9361/l_clk] [get_bd_pins $axi_ad9361_adapter/ap_clk]
+connect_bd_net [get_bd_pins $util_ad9361_lclk_reset/peripheral_aresetn] [get_bd_pins $axi_ad9361_adapter/ap_rst_n]
 
 # Connect ADC data from axi_ad9361 to adapter
 # Channel 0 I/Q
@@ -678,6 +674,71 @@ connect_bd_net [get_bd_pins $axi_ad9361/dac_enable_q1] [get_bd_pins $axi_ad9361_
 connect_bd_net [get_bd_pins $axi_ad9361_adapter/dac_dunf] [get_bd_pins $axi_ad9361/dac_dunf]
 
 ###############################################################################
+# AXI-Lite to Streaming Adapter (HLS IP)
+# Bridges CPU AXI-Lite to the AD9361 adapter's AXI-Stream and ap_none
+# control/status interfaces.  Runs in the 100 MHz AXI clock domain.
+###############################################################################
+
+puts "INFO: Instantiating AXI-Lite to Streaming Adapter..."
+
+create_bd_cell -type ip -vlnv user:hls:axi_lite_to_streaming_adapter:1.0 $axi_streaming_adapter
+
+# Connect adapter clock and reset (100 MHz AXI domain)
+connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1] [get_bd_pins $axi_streaming_adapter/ap_clk]
+connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins $axi_streaming_adapter/ap_rst_n]
+
+# Connect control/status pass-through wires between streaming adapter and AD9361 adapter
+connect_bd_net [get_bd_pins $axi_streaming_adapter/ctrl_out]     [get_bd_pins $axi_ad9361_adapter/ctrl_in]
+connect_bd_net [get_bd_pins $axi_streaming_adapter/rx_ctrl_out]  [get_bd_pins $axi_ad9361_adapter/rx_ctrl_in]
+connect_bd_net [get_bd_pins $axi_streaming_adapter/tx_ctrl_out]  [get_bd_pins $axi_ad9361_adapter/tx_ctrl_in]
+connect_bd_net [get_bd_pins $axi_streaming_adapter/loopback_out] [get_bd_pins $axi_ad9361_adapter/loopback_in]
+
+connect_bd_net [get_bd_pins $axi_ad9361_adapter/status_out]    [get_bd_pins $axi_streaming_adapter/status_in]
+connect_bd_net [get_bd_pins $axi_ad9361_adapter/rx_status_out] [get_bd_pins $axi_streaming_adapter/rx_status_in]
+connect_bd_net [get_bd_pins $axi_ad9361_adapter/rx_fill_out]   [get_bd_pins $axi_streaming_adapter/rx_fill_in]
+connect_bd_net [get_bd_pins $axi_ad9361_adapter/tx_status_out] [get_bd_pins $axi_streaming_adapter/tx_status_in]
+
+###############################################################################
+# AXI-Stream CDC FIFOs (100 MHz <-> 125 MHz l_clk)
+###############################################################################
+
+puts "INFO: Instantiating AXI-Stream CDC FIFOs..."
+
+# TX CDC FIFO: axi_streaming_adapter (100 MHz) -> ad9361_adapter (125 MHz l_clk)
+create_bd_cell -type ip -vlnv xilinx.com:ip:axis_data_fifo:2.0 $ad9361_cdc_tx_streaming_fifo
+set_property -dict [list CONFIG.HAS_TLAST.VALUE_SRC USER] [get_bd_cells $ad9361_cdc_tx_streaming_fifo]
+set_property -dict [list \
+    CONFIG.FIFO_DEPTH {256} \
+    CONFIG.IS_ACLK_ASYNC {1} \
+] [get_bd_cells $ad9361_cdc_tx_streaming_fifo]
+
+# TX FIFO clocks and resets
+connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1]             [get_bd_pins $ad9361_cdc_tx_streaming_fifo/s_axis_aclk]
+connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn]        [get_bd_pins $ad9361_cdc_tx_streaming_fifo/s_axis_aresetn]
+connect_bd_net [get_bd_pins $axi_ad9361/l_clk]                       [get_bd_pins $ad9361_cdc_tx_streaming_fifo/m_axis_aclk]
+
+# TX FIFO data path: streaming adapter -> FIFO -> ad9361_adapter
+connect_bd_intf_net [get_bd_intf_pins $axi_streaming_adapter/tx_stream]      [get_bd_intf_pins $ad9361_cdc_tx_streaming_fifo/S_AXIS]
+connect_bd_intf_net [get_bd_intf_pins $ad9361_cdc_tx_streaming_fifo/M_AXIS]  [get_bd_intf_pins $axi_ad9361_adapter/tx_stream]
+
+# RX CDC FIFO: ad9361_adapter (125 MHz l_clk) -> axi_streaming_adapter (100 MHz)
+create_bd_cell -type ip -vlnv xilinx.com:ip:axis_data_fifo:2.0 $ad9361_cdc_rx_streaming_fifo
+set_property -dict [list CONFIG.HAS_TLAST.VALUE_SRC USER] [get_bd_cells $ad9361_cdc_rx_streaming_fifo]
+set_property -dict [list \
+    CONFIG.FIFO_DEPTH {256} \
+    CONFIG.IS_ACLK_ASYNC {1} \
+] [get_bd_cells $ad9361_cdc_rx_streaming_fifo]
+
+# RX FIFO clocks and resets
+connect_bd_net [get_bd_pins $axi_ad9361/l_clk]                       [get_bd_pins $ad9361_cdc_rx_streaming_fifo/s_axis_aclk]
+connect_bd_net [get_bd_pins $util_ad9361_lclk_reset/peripheral_aresetn] [get_bd_pins $ad9361_cdc_rx_streaming_fifo/s_axis_aresetn]
+connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1]             [get_bd_pins $ad9361_cdc_rx_streaming_fifo/m_axis_aclk]
+
+# RX FIFO data path: ad9361_adapter -> FIFO -> streaming adapter
+connect_bd_intf_net [get_bd_intf_pins $axi_ad9361_adapter/rx_stream]          [get_bd_intf_pins $ad9361_cdc_rx_streaming_fifo/S_AXIS]
+connect_bd_intf_net [get_bd_intf_pins $ad9361_cdc_rx_streaming_fifo/M_AXIS]   [get_bd_intf_pins $axi_streaming_adapter/rx_stream]
+
+###############################################################################
 # AXI and Reset Connections
 ###############################################################################
 
@@ -702,8 +763,8 @@ connect_bd_intf_net [get_bd_intf_pins $axi_bram_controller/BRAM_PORTA] [get_bd_i
 # Connect axi_ad9361 AXI interface
 connect_bd_intf_net [get_bd_intf_pins $axi_ad9361/s_axi] [get_bd_intf_pins $axi_cpu_interconnect/M01_AXI]
 
-# Connect axi_ad9361_adapter AXI-Lite control interface
-connect_bd_intf_net [get_bd_intf_pins $axi_ad9361_adapter/s_axi_ctrl] [get_bd_intf_pins $axi_cpu_interconnect/M02_AXI]
+# Connect axi_streaming_adapter AXI-Lite control interface
+connect_bd_intf_net [get_bd_intf_pins $axi_streaming_adapter/s_axi_ctrl] [get_bd_intf_pins $axi_cpu_interconnect/M02_AXI]
 
 ###############################################################################
 # Address Assignment
@@ -721,10 +782,10 @@ assign_bd_address -target_address_space /$neorv32_cpu/m_axi [get_bd_addr_segs $a
 set_property offset 0x44A00000 [get_bd_addr_segs {NEORV32_RISC_V/m_axi/SEG_axi_ad9361_axi_lite}]
 set_property range 64K [get_bd_addr_segs {NEORV32_RISC_V/m_axi/SEG_axi_ad9361_axi_lite}]
 
-# axi_ad9361_adapter at 0x44A10000 (16KB range)
-assign_bd_address -target_address_space /$neorv32_cpu/m_axi [get_bd_addr_segs $axi_ad9361_adapter/s_axi_ctrl/Reg] -force
-set_property offset 0x44A10000 [get_bd_addr_segs {NEORV32_RISC_V/m_axi/SEG_axi_ad9361_adapter_Reg}]
-set_property range 16K [get_bd_addr_segs {NEORV32_RISC_V/m_axi/SEG_axi_ad9361_adapter_Reg}]
+# axi_streaming_adapter at 0x44A10000 (16KB range)
+assign_bd_address -target_address_space /$neorv32_cpu/m_axi [get_bd_addr_segs $axi_streaming_adapter/s_axi_ctrl/Reg] -force
+set_property offset 0x44A10000 [get_bd_addr_segs {NEORV32_RISC_V/m_axi/SEG_axi_streaming_adapter_Reg}]
+set_property range 16K [get_bd_addr_segs {NEORV32_RISC_V/m_axi/SEG_axi_streaming_adapter_Reg}]
 
 ###############################################################################
 # Save and Generate
@@ -757,10 +818,10 @@ catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_bram_co
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${qpsk_snapshot_bram}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_ad9361}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_ad9361_adapter}_0] }
-catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${util_ad9361_divclk}_0] }
-catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${util_ad9361_divclk_sel}_0] }
-catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${util_ad9361_divclk_sel_concat}_0] }
-catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${util_ad9361_divclk_reset}_0] }
+catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_streaming_adapter}_0] }
+catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${ad9361_cdc_tx_streaming_fifo}_0] }
+catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${ad9361_cdc_rx_streaming_fifo}_0] }
+catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${util_ad9361_lclk_reset}_0] }
 
 export_ip_user_files -of_objects [get_files $bd_file] -no_script -sync -force -quiet
 create_ip_run [get_files -of_objects [get_fileset sources_1] $bd_file]
@@ -774,10 +835,10 @@ set ip_synth_runs [list \
     ${top_level_bd_name}_${qpsk_snapshot_bram}_0_synth_1 \
     ${top_level_bd_name}_${axi_ad9361}_0_synth_1 \
     ${top_level_bd_name}_${axi_ad9361_adapter}_0_synth_1 \
-    ${top_level_bd_name}_${util_ad9361_divclk}_0_synth_1 \
-    ${top_level_bd_name}_${util_ad9361_divclk_sel}_0_synth_1 \
-    ${top_level_bd_name}_${util_ad9361_divclk_sel_concat}_0_synth_1 \
-    ${top_level_bd_name}_${util_ad9361_divclk_reset}_0_synth_1 \
+    ${top_level_bd_name}_${axi_streaming_adapter}_0_synth_1 \
+    ${top_level_bd_name}_${ad9361_cdc_tx_streaming_fifo}_0_synth_1 \
+    ${top_level_bd_name}_${ad9361_cdc_rx_streaming_fifo}_0_synth_1 \
+    ${top_level_bd_name}_${util_ad9361_lclk_reset}_0_synth_1 \
 ]
 launch_runs {*}$ip_synth_runs -jobs 16
 wait_on_runs {*}$ip_synth_runs
