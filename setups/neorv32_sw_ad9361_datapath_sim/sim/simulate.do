@@ -2,7 +2,15 @@
 # AD9361 Datapath Simulation - Questa Prime Simulation Script
 # ================================================================================
 # This script runs the AD9361 datapath loopback simulation
-# Usage: vsim -do simulate.do
+#
+# Usage (via run_sim.sh / run_sim.bat):
+#   ./run_sim.sh                    Fast mode (+acc=rn, no waveforms)
+#   ./run_sim.sh --detailed         Detailed mode (+acc=npr, full waveforms)
+#
+# Direct usage:
+#   vsim -do simulate.do
+#   vsim -do "set DETAILED yes; do simulate.do"
+#
 # ================================================================================
 
 # Source the compilation script first
@@ -17,8 +25,23 @@ if {![info exists SIM_TIME]} {
     set SIM_TIME "50ms"
 }
 
+# Detailed mode: "yes" = full signal visibility (+acc=npr) with waveforms
+# Default (fast): +acc=rn, no waveforms — significantly faster simulation
+if {![info exists DETAILED]} {
+    set DETAILED "no"
+}
+
+if {$DETAILED eq "yes"} {
+    set acc_flag "+acc=npr"
+    set mode_str "DETAILED (+acc=npr, waveforms enabled)"
+} else {
+    set acc_flag "+acc=rn"
+    set mode_str "FAST (+acc=rn, no waveforms)"
+}
+
 puts "=========================================="
 puts "Starting AD9361 Datapath Simulation..."
+puts "Mode:            $mode_str"
 puts "Simulation time: $SIM_TIME"
 puts "=========================================="
 
@@ -58,7 +81,7 @@ file copy -force $sim_dir/qpsk_bram_data.hex qpsk_bram_data.hex
 # Elaborate with optimization for the testbench
 # Include all required Xilinx libraries
 # Use -Lf neorv32 to force component binding to search the neorv32 library
-vopt -l elaborate.log +acc=npr -suppress 10016 \
+vopt -l elaborate.log $acc_flag -suppress 10016 \
     -L xil_defaultlib \
     -L xilinx_vip \
     -L xpm \
@@ -91,8 +114,10 @@ set NumericStdNoWarnings 1
 set StdArithNoWarnings 1
 
 # ================================================================================
-# Add Waveforms
+# Add Waveforms (detailed mode only)
 # ================================================================================
+
+if {$DETAILED eq "yes"} {
 
 add wave -divider "Clock & Reset"
 add wave -hex /vivado_tb/ecs_clk_in_p
@@ -210,10 +235,6 @@ catch {
     add wave -hex /vivado_tb/dut/Top_i/axi_streaming_adapter/ap_rst_n
 }
 
-# ================================================================================
-# Configure Waveform Display
-# ================================================================================
-
 configure wave -namecolwidth 400
 configure wave -valuecolwidth 120
 configure wave -signalnamewidth 1
@@ -221,6 +242,9 @@ configure wave -signalnamewidth 1
 view wave
 view structure
 view signals
+
+}
+# end if DETAILED
 
 # ================================================================================
 # Run Simulation
@@ -242,4 +266,6 @@ puts "Simulation Complete!"
 puts "Wall clock time: $elapsed_sec seconds"
 puts "=========================================="
 
-catch {wave zoom full}
+if {$DETAILED eq "yes"} {
+    catch {wave zoom full}
+}

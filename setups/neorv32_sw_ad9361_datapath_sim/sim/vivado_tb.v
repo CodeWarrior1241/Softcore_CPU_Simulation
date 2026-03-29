@@ -59,19 +59,26 @@
 // Test Sequence
 //------------------------------------------------------------------------------
 //
+// Testbench (runs independently):
 //  1. Reset held for 1ms (PLL lock and initialization)
 //  2. PLL locks, 100 MHz and 300 MHz clocks stable
-//  3. CPU starts streaming adapter bridge (ap_ctrl_chain)
-//  4. CPU configures adapter: channels, loopback, enable
-//  5. CPU enables AD9361 via GPIO (up_enable=1, up_txnrx=1)
-//  6. Testbench feeds COE data into LVDS RX at 125 MHz (looped)
-//  7. axi_ad9361 recovers l_clk, deserializes LVDS to ADC channels
-//  8. axi_ad9361_adapter captures ADC into AXI-Stream (l_clk domain)
-//  9. RX CDC FIFO crosses to 100 MHz domain
-// 10. Streaming adapter stores 1024 samples in rx_data[] for CPU readback
-// 11. CPU reads rx_data[], verifies, releases slot, repeats
-// 12. After 2 COE loops, testbench switches to TX->RX loopback mode
-// 13. Simulation runs for 50ms total
+//  3. Testbench feeds COE data into LVDS RX at 125 MHz (looped)
+//  4. After 2 full COE loops (2048 samples), switches to TX->RX loopback
+//  5. Simulation runs for 50ms total
+//
+// CPU firmware (runs in parallel after reset):
+//  1. Boot, init UART, start streaming adapter bridge (ap_ctrl_chain)
+//  2. Configure adapter: all channels enabled, loopback on
+//  3. Enable AD9361 via GPIO (up_enable=1, up_txnrx=1)
+//  4. Write 1024 known samples to TX buffer, trigger TX burst
+//  5. Wait for RX_READY, read back 1024 samples, verify, release slot
+//  6. Repeat RX readback for 3 cycles, report PASS/FAIL via UART
+//
+// Datapath (hardware):
+//  COE/loopback -> LVDS RX -> axi_ad9361 ADC -> axi_ad9361_adapter (125 MHz)
+//  -> RX CDC FIFO -> streaming adapter rx_data[] (100 MHz, CPU reads)
+//  CPU writes tx_data[] -> streaming adapter -> TX CDC FIFO
+//  -> axi_ad9361_adapter -> axi_ad9361 DAC -> LVDS TX
 //
 //------------------------------------------------------------------------------
 

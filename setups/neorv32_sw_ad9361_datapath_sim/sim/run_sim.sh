@@ -2,7 +2,25 @@
 # ================================================================================
 # AD9361 Datapath Simulation - Questa Prime Launcher (Unix/Linux/macOS)
 # ================================================================================
-# This script launches Questa Prime simulation for the AD9361 datapath test
+# This script launches Questa Prime simulation for the AD9361 datapath test.
+#
+# Two simulation modes are available:
+#
+#   DEFAULT (fast):   +acc=rn optimization, no waveform logging.
+#                     Suitable for functional pass/fail runs where only
+#                     UART output is needed. Significantly faster.
+#
+#  ./run_sim.sh                    # +acc=rn, no waveforms
+#  ./run_sim.sh --batch            # same, headless
+#
+#   DETAILED:         +acc=npr optimization, full waveform logging for all
+#                     internal signals (clocks, resets, LVDS, AXI-Stream,
+#                     CDC FIFOs, adapter control/status, CPU).
+#                     Use for debugging and signal-level analysis.
+#
+#  ./run_sim.sh --detailed         # +acc=npr, full waveforms
+#  ./run_sim.sh --detailed --batch # same, headless
+#
 # ================================================================================
 
 set -e
@@ -11,6 +29,7 @@ set -e
 VSIM="${VSIM:-vsim}"
 SIM_MODE="gui"
 SIM_TIME="50ms"
+DETAILED="no"
 
 # Change to script directory
 cd "$(dirname "$0")"
@@ -30,6 +49,10 @@ while [[ $# -gt 0 ]]; do
             SIM_MODE="batch"
             shift
             ;;
+        --detailed)
+            DETAILED="yes"
+            shift
+            ;;
         --clean)
             echo "Cleaning work directories and simulation artifacts..."
             rm -rf questa_lib work
@@ -43,17 +66,17 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: ./run_sim.sh [options]"
             echo ""
             echo "Options:"
-            echo "  --time TIME    Set simulation time (default: 10ms)"
+            echo "  --time TIME    Set simulation time (default: 50ms)"
             echo "  --gui          Run in GUI mode (default)"
             echo "  --batch        Run in batch/command-line mode"
+            echo "  --detailed     Full signal visibility (+acc=npr) with waveforms"
             echo "  --clean        Remove work directories and generated files"
             echo "  --help         Show this help message"
             echo ""
             echo "Examples:"
-            echo "  ./run_sim.sh                    Run with defaults (10ms, GUI)"
-            echo "  ./run_sim.sh --time 5ms         Run for 5ms"
-            echo "  ./run_sim.sh --batch            Run in batch mode"
-            echo "  ./run_sim.sh --time 20ms --batch  Run 20ms in batch mode"
+            echo "  ./run_sim.sh                       Run fast (50ms, GUI, +acc=rn)"
+            echo "  ./run_sim.sh --detailed            Run with full waveforms"
+            echo "  ./run_sim.sh --time 5ms --batch    Run 5ms in batch mode"
             exit 0
             ;;
         *)
@@ -84,16 +107,37 @@ if [ ! -f "qpsk_bram_data.hex" ]; then
     echo "Generated qpsk_bram_data.hex successfully"
 fi
 
+# Sync NEORV32 IMEM image to ipshared locations used by Vivado's compile.do.
+# The Vivado IP packaging creates snapshots under ipshared/ which go stale
+# when firmware is rebuilt. Copy the current image so the simulation always
+# uses the latest build.
+NEORV32_HOME="$(cd "../../.." && pwd)"
+IMEM_SRC="$NEORV32_HOME/rtl/core/neorv32_imem_image.vhd"
+IPSHARED_DIR="../NEORV32_Simulation.ip_user_files/bd/Top/ipshared/9d53/src/neorv32"
+IPSHARED_GEN="../NEORV32_Simulation.gen/sources_1/bd/Top/ipshared/9d53/src/neorv32"
+
+if [ -f "$IMEM_SRC" ]; then
+    echo "Syncing IMEM image from source..."
+    [ -d "$IPSHARED_DIR" ] && cp -f "$IMEM_SRC" "$IPSHARED_DIR/neorv32_imem_image.vhd"
+    [ -d "$IPSHARED_GEN" ] && cp -f "$IMEM_SRC" "$IPSHARED_GEN/neorv32_imem_image.vhd"
+else
+    echo "WARNING: IMEM image not found at $IMEM_SRC"
+    echo "  Build firmware first: cd sw/ad9361_loopback && make clean_all exe install"
+fi
+
 echo "=========================================="
 echo "AD9361 Datapath Questa Simulation"
 echo "=========================================="
 echo "Simulation time: $SIM_TIME"
 echo "Simulation mode: $SIM_MODE"
+echo "Detailed:        $DETAILED"
 echo "=========================================="
+
+SIM_VARS="set SIM_TIME {$SIM_TIME}; set DETAILED {$DETAILED}"
 
 if [[ "$SIM_MODE" == "batch" ]]; then
     echo "Running in batch mode..."
-    $VSIM -c -do "set SIM_TIME {$SIM_TIME}; do simulate.do; quit -f"
+    $VSIM -c -do "$SIM_VARS; do simulate.do; quit -f"
 
     echo ""
     echo "=========================================="
@@ -101,5 +145,5 @@ if [[ "$SIM_MODE" == "batch" ]]; then
     echo "=========================================="
 else
     echo "Running in GUI mode..."
-    $VSIM -do "set SIM_TIME {$SIM_TIME}; do simulate.do"
+    $VSIM -do "$SIM_VARS; do simulate.do"
 fi
