@@ -48,6 +48,8 @@ variable axi_streaming_adapter "axi_streaming_adapter"
 # AXI-Stream CDC FIFOs (100 MHz <-> 125 MHz l_clk)
 variable ad9361_cdc_tx_streaming_fifo "ad9361_cdc_tx_streaming_fifo"
 variable ad9361_cdc_rx_streaming_fifo "ad9361_cdc_rx_streaming_fifo"
+variable ad9361_cdc_ctrl_fifo "ad9361_cdc_ctrl_fifo"
+variable ad9361_cdc_status_fifo "ad9361_cdc_status_fifo"
 
 # Reset synchronizer for AD9361 l_clk domain
 variable util_ad9361_lclk_reset "util_ad9361_lclk_reset"
@@ -115,6 +117,7 @@ proc build_all {} {
     global axi_ad9361 axi_ad9361_adapter
     global axi_streaming_adapter
     global ad9361_cdc_tx_streaming_fifo ad9361_cdc_rx_streaming_fifo
+    global ad9361_cdc_ctrl_fifo ad9361_cdc_status_fifo
     global util_ad9361_lclk_reset
 
     # Read ADI IP directory from environment variable
@@ -572,6 +575,11 @@ connect_bd_net [get_bd_ports enable] [get_bd_pins $axi_ad9361/enable]
 connect_bd_net [get_bd_ports txnrx] [get_bd_pins $axi_ad9361/txnrx]
 
 # Connect delay_clk for IODELAY calibration
+# Tie off tdd_sync (TDD not used — running FDD mode)
+create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 tdd_sync_const
+set_property -dict [list CONFIG.CONST_VAL {0} CONFIG.CONST_WIDTH {1}] [get_bd_cells tdd_sync_const]
+connect_bd_net [get_bd_pins tdd_sync_const/dout] [get_bd_pins $axi_ad9361/tdd_sync]
+
 connect_bd_net [get_bd_pins $axi_ad9361/delay_clk] [get_bd_pins $ecs_clock_300_mhz/clk_out2]
 
 # Connect l_clk to itself (AD9361 uses recovered clock internally)
@@ -687,16 +695,7 @@ create_bd_cell -type ip -vlnv user:hls:axi_lite_to_streaming_adapter:1.0 $axi_st
 connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1] [get_bd_pins $axi_streaming_adapter/ap_clk]
 connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins $axi_streaming_adapter/ap_rst_n]
 
-# Connect control/status pass-through wires between streaming adapter and AD9361 adapter
-connect_bd_net [get_bd_pins $axi_streaming_adapter/ctrl_out]     [get_bd_pins $axi_ad9361_adapter/ctrl_in]
-connect_bd_net [get_bd_pins $axi_streaming_adapter/rx_ctrl_out]  [get_bd_pins $axi_ad9361_adapter/rx_ctrl_in]
-connect_bd_net [get_bd_pins $axi_streaming_adapter/tx_ctrl_out]  [get_bd_pins $axi_ad9361_adapter/tx_ctrl_in]
-connect_bd_net [get_bd_pins $axi_streaming_adapter/loopback_out] [get_bd_pins $axi_ad9361_adapter/loopback_in]
-
-connect_bd_net [get_bd_pins $axi_ad9361_adapter/status_out]    [get_bd_pins $axi_streaming_adapter/status_in]
-connect_bd_net [get_bd_pins $axi_ad9361_adapter/rx_status_out] [get_bd_pins $axi_streaming_adapter/rx_status_in]
-connect_bd_net [get_bd_pins $axi_ad9361_adapter/rx_fill_out]   [get_bd_pins $axi_streaming_adapter/rx_fill_in]
-connect_bd_net [get_bd_pins $axi_ad9361_adapter/tx_status_out] [get_bd_pins $axi_streaming_adapter/tx_status_in]
+# Control/Status CDC handled by async FIFOs below (ctrl_stream, status_stream)
 
 ###############################################################################
 # AXI-Stream CDC FIFOs (100 MHz <-> 125 MHz l_clk)
@@ -737,6 +736,42 @@ connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1]             [get_bd_pin
 # RX FIFO data path: ad9361_adapter -> FIFO -> streaming adapter
 connect_bd_intf_net [get_bd_intf_pins $axi_ad9361_adapter/rx_stream]          [get_bd_intf_pins $ad9361_cdc_rx_streaming_fifo/S_AXIS]
 connect_bd_intf_net [get_bd_intf_pins $ad9361_cdc_rx_streaming_fifo/M_AXIS]   [get_bd_intf_pins $axi_streaming_adapter/rx_stream]
+
+# Ctrl CDC FIFO: axi_streaming_adapter (100 MHz) -> ad9361_adapter (125 MHz l_clk)
+# 128-bit wide (4x 32-bit packed control registers)
+create_bd_cell -type ip -vlnv xilinx.com:ip:axis_data_fifo:2.0 $ad9361_cdc_ctrl_fifo
+set_property -dict [list CONFIG.TDATA_NUM_BYTES.VALUE_SRC USER] [get_bd_cells $ad9361_cdc_ctrl_fifo]
+set_property -dict [list \
+    CONFIG.FIFO_DEPTH {64} \
+    CONFIG.FIFO_MEMORY_TYPE {auto} \
+    CONFIG.IS_ACLK_ASYNC {1} \
+    CONFIG.TDATA_NUM_BYTES {128} \
+] [get_bd_cells $ad9361_cdc_ctrl_fifo]
+
+connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1]             [get_bd_pins $ad9361_cdc_ctrl_fifo/s_axis_aclk]
+connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn]        [get_bd_pins $ad9361_cdc_ctrl_fifo/s_axis_aresetn]
+connect_bd_net [get_bd_pins $axi_ad9361/l_clk]                       [get_bd_pins $ad9361_cdc_ctrl_fifo/m_axis_aclk]
+
+connect_bd_intf_net [get_bd_intf_pins $axi_streaming_adapter/ctrl_stream]    [get_bd_intf_pins $ad9361_cdc_ctrl_fifo/S_AXIS]
+connect_bd_intf_net [get_bd_intf_pins $ad9361_cdc_ctrl_fifo/M_AXIS]          [get_bd_intf_pins $axi_ad9361_adapter/ctrl_stream]
+
+# Status CDC FIFO: ad9361_adapter (125 MHz l_clk) -> axi_streaming_adapter (100 MHz)
+# 128-bit wide (4x 32-bit packed status registers)
+create_bd_cell -type ip -vlnv xilinx.com:ip:axis_data_fifo:2.0 $ad9361_cdc_status_fifo
+set_property -dict [list CONFIG.TDATA_NUM_BYTES.VALUE_SRC USER] [get_bd_cells $ad9361_cdc_status_fifo]
+set_property -dict [list \
+    CONFIG.FIFO_DEPTH {64} \
+    CONFIG.FIFO_MEMORY_TYPE {auto} \
+    CONFIG.IS_ACLK_ASYNC {1} \
+    CONFIG.TDATA_NUM_BYTES {128} \
+] [get_bd_cells $ad9361_cdc_status_fifo]
+
+connect_bd_net [get_bd_pins $axi_ad9361/l_clk]                              [get_bd_pins $ad9361_cdc_status_fifo/s_axis_aclk]
+connect_bd_net [get_bd_pins $util_ad9361_lclk_reset/peripheral_aresetn]      [get_bd_pins $ad9361_cdc_status_fifo/s_axis_aresetn]
+connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1]                    [get_bd_pins $ad9361_cdc_status_fifo/m_axis_aclk]
+
+connect_bd_intf_net [get_bd_intf_pins $axi_ad9361_adapter/status_stream]     [get_bd_intf_pins $ad9361_cdc_status_fifo/S_AXIS]
+connect_bd_intf_net [get_bd_intf_pins $ad9361_cdc_status_fifo/M_AXIS]        [get_bd_intf_pins $axi_streaming_adapter/status_stream]
 
 ###############################################################################
 # AXI and Reset Connections
@@ -821,6 +856,8 @@ catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_ad9361_
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_streaming_adapter}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${ad9361_cdc_tx_streaming_fifo}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${ad9361_cdc_rx_streaming_fifo}_0] }
+catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${ad9361_cdc_ctrl_fifo}_0] }
+catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${ad9361_cdc_status_fifo}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${util_ad9361_lclk_reset}_0] }
 
 export_ip_user_files -of_objects [get_files $bd_file] -no_script -sync -force -quiet
@@ -838,6 +875,8 @@ set ip_synth_runs [list \
     ${top_level_bd_name}_${axi_streaming_adapter}_0_synth_1 \
     ${top_level_bd_name}_${ad9361_cdc_tx_streaming_fifo}_0_synth_1 \
     ${top_level_bd_name}_${ad9361_cdc_rx_streaming_fifo}_0_synth_1 \
+    ${top_level_bd_name}_${ad9361_cdc_ctrl_fifo}_0_synth_1 \
+    ${top_level_bd_name}_${ad9361_cdc_status_fifo}_0_synth_1 \
     ${top_level_bd_name}_${util_ad9361_lclk_reset}_0_synth_1 \
 ]
 launch_runs {*}$ip_synth_runs -jobs 16
