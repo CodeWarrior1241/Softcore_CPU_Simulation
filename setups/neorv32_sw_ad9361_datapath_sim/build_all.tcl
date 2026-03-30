@@ -188,6 +188,44 @@ set synth_sources_name [get_filesets -filter {FILESET_TYPE == "DesignSrcs"}]
 set sim_sources_name [get_filesets -filter {FILESET_TYPE == "SimulationSrcs"}]
 set impl_sources_name [get_filesets -filter {FILESET_TYPE == "Constrs"}]
 
+###############################################################################
+# Open-Logic VHDL Sources (olo_base_fifo_async wrapper for CDC)
+###############################################################################
+
+set olo_vhdl_dir [file normalize "$project_dir/../../../../deps/open-logic/src/base/vhdl"]
+set wrapper_dir  [file normalize "$project_dir/../../../../src/olo_base_fifo_async_wrapper"]
+
+if {![file exists $olo_vhdl_dir/olo_base_fifo_async.vhd]} {
+    puts "ERROR: Open-logic sources not found at $olo_vhdl_dir"
+    puts "       Ensure deps/open-logic submodule is initialized."
+    return -1
+}
+
+puts "INFO: Adding open-logic VHDL sources and FIFO wrapper..."
+
+# Open-logic dependencies require VHDL-2008 (unconstrained array elements)
+set olo_dep_files [list \
+    $olo_vhdl_dir/olo_base_pkg_array.vhd \
+    $olo_vhdl_dir/olo_base_pkg_attribute.vhd \
+    $olo_vhdl_dir/olo_base_pkg_math.vhd \
+    $olo_vhdl_dir/olo_base_pkg_logic.vhd \
+    $olo_vhdl_dir/olo_base_pkg_string.vhd \
+    $olo_vhdl_dir/olo_base_cc_bits.vhd \
+    $olo_vhdl_dir/olo_base_ram_sdp.vhd \
+    $olo_vhdl_dir/olo_base_cc_reset.vhd \
+    $olo_vhdl_dir/olo_base_fifo_async.vhd \
+]
+add_files -norecurse $olo_dep_files
+set_property file_type {VHDL 2008} [get_files $olo_dep_files]
+
+# Wrapper stays plain VHDL (required for module reference — Vivado rejects VHDL-2008 top)
+add_files -norecurse $wrapper_dir/olo_base_fifo_async_wrapper.vhd
+
+# Load open-logic scoped constraints for CDC timing (implementation only)
+# Applies set_max_delay -datapath_only and set_bus_skew to olo_base_cc_bits instances
+set olo_tcl_dir [file normalize "$olo_vhdl_dir/../tcl"]
+source $olo_tcl_dir/olo_base_constraints_amd.tcl
+
 # Create the top level block design
 create_bd_design $top_level_bd_name
 update_compile_order -fileset $synth_sources_name
@@ -738,40 +776,36 @@ connect_bd_intf_net [get_bd_intf_pins $axi_ad9361_adapter/rx_stream]          [g
 connect_bd_intf_net [get_bd_intf_pins $ad9361_cdc_rx_streaming_fifo/M_AXIS]   [get_bd_intf_pins $axi_streaming_adapter/rx_stream]
 
 # Ctrl CDC FIFO: axi_streaming_adapter (100 MHz) -> ad9361_adapter (125 MHz l_clk)
-# 128-bit wide (4x 32-bit packed control registers)
-create_bd_cell -type ip -vlnv xilinx.com:ip:axis_data_fifo:2.0 $ad9361_cdc_ctrl_fifo
-set_property -dict [list CONFIG.TDATA_NUM_BYTES.VALUE_SRC USER] [get_bd_cells $ad9361_cdc_ctrl_fifo]
-set_property -dict [list \
-    CONFIG.FIFO_DEPTH {64} \
-    CONFIG.FIFO_MEMORY_TYPE {auto} \
-    CONFIG.IS_ACLK_ASYNC {1} \
-    CONFIG.TDATA_NUM_BYTES {128} \
-] [get_bd_cells $ad9361_cdc_ctrl_fifo]
+# 128-bit wide, depth-2 distributed RAM via open-logic olo_base_fifo_async
+create_bd_cell -type module -reference olo_base_fifo_async_wrapper $ad9361_cdc_ctrl_fifo
 
-connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1]             [get_bd_pins $ad9361_cdc_ctrl_fifo/s_axis_aclk]
-connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn]        [get_bd_pins $ad9361_cdc_ctrl_fifo/s_axis_aresetn]
-connect_bd_net [get_bd_pins $axi_ad9361/l_clk]                       [get_bd_pins $ad9361_cdc_ctrl_fifo/m_axis_aclk]
+connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1]                  [get_bd_pins $ad9361_cdc_ctrl_fifo/In_Clk]
+connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn]             [get_bd_pins $ad9361_cdc_ctrl_fifo/In_Rst_n]
+connect_bd_net [get_bd_pins $axi_ad9361/l_clk]                            [get_bd_pins $ad9361_cdc_ctrl_fifo/Out_Clk]
+connect_bd_net [get_bd_pins $util_ad9361_lclk_reset/peripheral_aresetn]    [get_bd_pins $ad9361_cdc_ctrl_fifo/Out_Rst_n]
 
-connect_bd_intf_net [get_bd_intf_pins $axi_streaming_adapter/ctrl_stream]    [get_bd_intf_pins $ad9361_cdc_ctrl_fifo/S_AXIS]
-connect_bd_intf_net [get_bd_intf_pins $ad9361_cdc_ctrl_fifo/M_AXIS]          [get_bd_intf_pins $axi_ad9361_adapter/ctrl_stream]
+connect_bd_net [get_bd_pins $axi_streaming_adapter/ctrl_data_out]   [get_bd_pins $ad9361_cdc_ctrl_fifo/In_Data]
+connect_bd_net [get_bd_pins $axi_streaming_adapter/ctrl_valid_out]  [get_bd_pins $ad9361_cdc_ctrl_fifo/In_Valid]
+connect_bd_net [get_bd_pins $ad9361_cdc_ctrl_fifo/In_Ready]         [get_bd_pins $axi_streaming_adapter/ctrl_ready_in]
+connect_bd_net [get_bd_pins $ad9361_cdc_ctrl_fifo/Out_Data]         [get_bd_pins $axi_ad9361_adapter/ctrl_data_in]
+connect_bd_net [get_bd_pins $ad9361_cdc_ctrl_fifo/Out_Valid]        [get_bd_pins $axi_ad9361_adapter/ctrl_valid_in]
+connect_bd_net [get_bd_pins $axi_ad9361_adapter/ctrl_ready_out]     [get_bd_pins $ad9361_cdc_ctrl_fifo/Out_Ready]
 
 # Status CDC FIFO: ad9361_adapter (125 MHz l_clk) -> axi_streaming_adapter (100 MHz)
-# 128-bit wide (4x 32-bit packed status registers)
-create_bd_cell -type ip -vlnv xilinx.com:ip:axis_data_fifo:2.0 $ad9361_cdc_status_fifo
-set_property -dict [list CONFIG.TDATA_NUM_BYTES.VALUE_SRC USER] [get_bd_cells $ad9361_cdc_status_fifo]
-set_property -dict [list \
-    CONFIG.FIFO_DEPTH {64} \
-    CONFIG.FIFO_MEMORY_TYPE {auto} \
-    CONFIG.IS_ACLK_ASYNC {1} \
-    CONFIG.TDATA_NUM_BYTES {128} \
-] [get_bd_cells $ad9361_cdc_status_fifo]
+# 128-bit wide, depth-2 distributed RAM via open-logic olo_base_fifo_async
+create_bd_cell -type module -reference olo_base_fifo_async_wrapper $ad9361_cdc_status_fifo
 
-connect_bd_net [get_bd_pins $axi_ad9361/l_clk]                              [get_bd_pins $ad9361_cdc_status_fifo/s_axis_aclk]
-connect_bd_net [get_bd_pins $util_ad9361_lclk_reset/peripheral_aresetn]      [get_bd_pins $ad9361_cdc_status_fifo/s_axis_aresetn]
-connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1]                    [get_bd_pins $ad9361_cdc_status_fifo/m_axis_aclk]
+connect_bd_net [get_bd_pins $axi_ad9361/l_clk]                              [get_bd_pins $ad9361_cdc_status_fifo/In_Clk]
+connect_bd_net [get_bd_pins $util_ad9361_lclk_reset/peripheral_aresetn]      [get_bd_pins $ad9361_cdc_status_fifo/In_Rst_n]
+connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1]                    [get_bd_pins $ad9361_cdc_status_fifo/Out_Clk]
+connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn]               [get_bd_pins $ad9361_cdc_status_fifo/Out_Rst_n]
 
-connect_bd_intf_net [get_bd_intf_pins $axi_ad9361_adapter/status_stream]     [get_bd_intf_pins $ad9361_cdc_status_fifo/S_AXIS]
-connect_bd_intf_net [get_bd_intf_pins $ad9361_cdc_status_fifo/M_AXIS]        [get_bd_intf_pins $axi_streaming_adapter/status_stream]
+connect_bd_net [get_bd_pins $axi_ad9361_adapter/status_data_out]     [get_bd_pins $ad9361_cdc_status_fifo/In_Data]
+connect_bd_net [get_bd_pins $axi_ad9361_adapter/status_valid_out]    [get_bd_pins $ad9361_cdc_status_fifo/In_Valid]
+connect_bd_net [get_bd_pins $ad9361_cdc_status_fifo/In_Ready]        [get_bd_pins $axi_ad9361_adapter/status_ready_in]
+connect_bd_net [get_bd_pins $ad9361_cdc_status_fifo/Out_Data]        [get_bd_pins $axi_streaming_adapter/status_data_in]
+connect_bd_net [get_bd_pins $ad9361_cdc_status_fifo/Out_Valid]       [get_bd_pins $axi_streaming_adapter/status_valid_in]
+connect_bd_net [get_bd_pins $axi_streaming_adapter/status_ready_out] [get_bd_pins $ad9361_cdc_status_fifo/Out_Ready]
 
 ###############################################################################
 # AXI and Reset Connections
@@ -856,8 +890,6 @@ catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_ad9361_
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_streaming_adapter}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${ad9361_cdc_tx_streaming_fifo}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${ad9361_cdc_rx_streaming_fifo}_0] }
-catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${ad9361_cdc_ctrl_fifo}_0] }
-catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${ad9361_cdc_status_fifo}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${util_ad9361_lclk_reset}_0] }
 
 export_ip_user_files -of_objects [get_files $bd_file] -no_script -sync -force -quiet
@@ -875,8 +907,6 @@ set ip_synth_runs [list \
     ${top_level_bd_name}_${axi_streaming_adapter}_0_synth_1 \
     ${top_level_bd_name}_${ad9361_cdc_tx_streaming_fifo}_0_synth_1 \
     ${top_level_bd_name}_${ad9361_cdc_rx_streaming_fifo}_0_synth_1 \
-    ${top_level_bd_name}_${ad9361_cdc_ctrl_fifo}_0_synth_1 \
-    ${top_level_bd_name}_${ad9361_cdc_status_fifo}_0_synth_1 \
     ${top_level_bd_name}_${util_ad9361_lclk_reset}_0_synth_1 \
 ]
 launch_runs {*}$ip_synth_runs -jobs 16

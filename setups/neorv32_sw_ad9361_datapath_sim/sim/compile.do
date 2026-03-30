@@ -150,6 +150,29 @@ puts "=========================================="
 vmap xil_defaultlib $vivado_questa_dir/questa_lib/msim/xil_defaultlib
 vmap neorv32 $vivado_questa_dir/questa_lib/msim/neorv32
 
+# ================================================================================
+# Compile Open-Logic VHDL Sources (olo_base_fifo_async and dependencies)
+# ================================================================================
+
+puts "=========================================="
+puts "Compiling Open-Logic VHDL Sources..."
+puts "=========================================="
+
+set olo_vhdl_dir [file normalize "$sim_dir/../../../../../deps/open-logic/src/base/vhdl"]
+set wrapper_dir  [file normalize "$sim_dir/../../../../../src/olo_base_fifo_async_wrapper"]
+
+vcom -work xil_defaultlib -2008 \
+    $olo_vhdl_dir/olo_base_pkg_array.vhd \
+    $olo_vhdl_dir/olo_base_pkg_attribute.vhd \
+    $olo_vhdl_dir/olo_base_pkg_math.vhd \
+    $olo_vhdl_dir/olo_base_pkg_logic.vhd \
+    $olo_vhdl_dir/olo_base_pkg_string.vhd \
+    $olo_vhdl_dir/olo_base_cc_bits.vhd \
+    $olo_vhdl_dir/olo_base_ram_sdp.vhd \
+    $olo_vhdl_dir/olo_base_cc_reset.vhd \
+    $olo_vhdl_dir/olo_base_fifo_async.vhd \
+    $wrapper_dir/olo_base_fifo_async_wrapper.vhd
+
 # Compile our custom Verilog testbench
 # Use -incr for incremental compilation
 vlog -work xil_defaultlib -incr -sv \
