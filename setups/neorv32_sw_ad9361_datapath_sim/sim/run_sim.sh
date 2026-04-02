@@ -28,7 +28,7 @@ set -e
 # Configuration
 VSIM="${VSIM:-vsim}"
 SIM_MODE="gui"
-SIM_TIME="50ms"
+SIM_TIME="10ms"
 DETAILED="no"
 
 # Change to script directory

@@ -362,6 +362,196 @@ module vivado_tb;
     end
 
     //--------------------------------------------------------------------------
+    // Hardware Milestone Monitors
+    // These fire on signal edges and print immediately — no UART delay.
+    //--------------------------------------------------------------------------
+
+    // PLL lock
+    reg pll_locked_prev;
+    always @(posedge sim_clock_100MHz) begin
+        pll_locked_prev <= sim_clock_100MHz_locked;
+        if (sim_clock_100MHz_locked && !pll_locked_prev)
+            $display("[%0t] MILESTONE: PLL locked", $time);
+    end
+
+    // AD9361 enable/txnrx (GPIO-driven)
+    reg enable_prev, txnrx_prev;
+    always @(posedge sim_clock_100MHz) begin
+        enable_prev <= enable;
+        txnrx_prev  <= txnrx;
+        if (enable && !enable_prev)
+            $display("[%0t] MILESTONE: AD9361 enable asserted", $time);
+        if (txnrx && !txnrx_prev)
+            $display("[%0t] MILESTONE: AD9361 txnrx asserted", $time);
+    end
+
+    // First ADC valid from axi_ad9361 (sampled on l_clk, gated on GPIO[2] = AD9361 configured)
+    reg first_adc_valid_seen;
+    initial first_adc_valid_seen = 0;
+    always @(posedge dut.Top_i.axi_ad9361.l_clk) begin
+        if (!first_adc_valid_seen && dut.Top_i.NEORV32_RISC_V.gpio_o[2]) begin
+            if (dut.Top_i.axi_ad9361_adapter.adc_valid_i0) begin
+                first_adc_valid_seen <= 1;
+                $display("[%0t] MILESTONE: First ADC valid detected at adapter (post-config)", $time);
+            end
+        end
+    end
+
+    // Ctrl CDC FIFO activity
+    reg first_ctrl_out_valid_seen;
+    initial first_ctrl_out_valid_seen = 0;
+    always @(posedge sim_clock_100MHz) begin
+        if (!first_ctrl_out_valid_seen) begin
+            if (dut.Top_i.ad9361_cdc_ctrl_fifo.Out_Valid) begin
+                first_ctrl_out_valid_seen <= 1;
+                $display("[%0t] MILESTONE: First ctrl word delivered to adapter (FIFO Out_Valid)", $time);
+            end
+        end
+    end
+
+    // Status CDC FIFO activity
+    reg first_status_out_valid_seen;
+    initial first_status_out_valid_seen = 0;
+    always @(posedge sim_clock_100MHz) begin
+        if (!first_status_out_valid_seen) begin
+            if (dut.Top_i.ad9361_cdc_status_fifo.Out_Valid) begin
+                first_status_out_valid_seen <= 1;
+                $display("[%0t] MILESTONE: First status word delivered to bridge (FIFO Out_Valid)", $time);
+            end
+        end
+    end
+
+    // TX stream: bridge side (into CDC FIFO)
+    reg first_tx_bridge_seen;
+    initial first_tx_bridge_seen = 0;
+    always @(posedge sim_clock_100MHz) begin
+        if (!first_tx_bridge_seen) begin
+            if (dut.Top_i.ad9361_cdc_tx_streaming_fifo.s_axis_tvalid) begin
+                first_tx_bridge_seen <= 1;
+                $display("[%0t] MILESTONE: First TX TVALID at CDC FIFO input (bridge side)", $time);
+            end
+        end
+    end
+
+    // TX stream: adapter side (out of CDC FIFO)
+    reg first_tx_stream_seen;
+    initial first_tx_stream_seen = 0;
+    always @(posedge sim_clock_100MHz) begin
+        if (!first_tx_stream_seen) begin
+            if (dut.Top_i.axi_ad9361_adapter.tx_stream_TVALID) begin
+                first_tx_stream_seen <= 1;
+                $display("[%0t] MILESTONE: First TX TVALID at adapter (CDC FIFO output)", $time);
+            end
+        end
+    end
+
+    // RX stream: adapter side (into CDC FIFO)
+    reg first_rx_adapter_seen;
+    initial first_rx_adapter_seen = 0;
+    always @(posedge sim_clock_100MHz) begin
+        if (!first_rx_adapter_seen) begin
+            if (dut.Top_i.axi_ad9361_adapter.rx_stream_TVALID) begin
+                first_rx_adapter_seen <= 1;
+                $display("[%0t] MILESTONE: First RX TVALID at adapter (into CDC FIFO)", $time);
+            end
+        end
+    end
+
+    // RX stream: bridge side (out of CDC FIFO)
+    reg first_rx_bridge_seen;
+    initial first_rx_bridge_seen = 0;
+    always @(posedge sim_clock_100MHz) begin
+        if (!first_rx_bridge_seen) begin
+            if (dut.Top_i.ad9361_cdc_rx_streaming_fifo.m_axis_tvalid) begin
+                first_rx_bridge_seen <= 1;
+                $display("[%0t] MILESTONE: First RX TVALID at bridge (CDC FIFO output)", $time);
+            end
+        end
+    end
+
+    // Adapter ctrl_valid_in — is the adapter actually receiving control words?
+    reg first_adapter_ctrl_seen;
+    initial first_adapter_ctrl_seen = 0;
+    always @(posedge sim_clock_100MHz) begin
+        if (!first_adapter_ctrl_seen) begin
+            if (dut.Top_i.axi_ad9361_adapter.ctrl_valid_in) begin
+                first_adapter_ctrl_seen <= 1;
+                $display("[%0t] MILESTONE: First ctrl_valid_in at adapter (ctrl accepted)", $time);
+            end
+        end
+    end
+
+    // l_clk activity check (gated on reset released to avoid pre-reset transients)
+    reg first_lclk_seen;
+    integer lclk_edge_count;
+    initial begin first_lclk_seen = 0; lclk_edge_count = 0; end
+    always @(posedge dut.Top_i.axi_ad9361.l_clk) begin
+        if (system_resetn) begin
+            lclk_edge_count <= lclk_edge_count + 1;
+            if (!first_lclk_seen) begin
+                first_lclk_seen <= 1;
+                $display("[%0t] MILESTONE: First l_clk edge detected (post-reset)", $time);
+            end
+        end
+    end
+
+    // l_clk death detector — if no edge for 1us, report it
+    reg [31:0] lclk_last_count;
+    initial lclk_last_count = 0;
+    always begin
+        #1_000_000; // check every 1ms
+        if (lclk_edge_count == lclk_last_count && first_lclk_seen)
+            $display("[%0t] WARNING: l_clk appears stopped (no edges in last 1ms, count=%0d)", $time, lclk_edge_count);
+        lclk_last_count = lclk_edge_count;
+    end
+
+    // TX CDC FIFO m_axis_tready — is the adapter accepting data?
+    reg first_tx_fifo_ready_seen;
+    initial first_tx_fifo_ready_seen = 0;
+    always @(posedge sim_clock_100MHz) begin
+        if (!first_tx_fifo_ready_seen) begin
+            if (dut.Top_i.ad9361_cdc_tx_streaming_fifo.m_axis_tready) begin
+                first_tx_fifo_ready_seen <= 1;
+                $display("[%0t] MILESTONE: TX CDC FIFO m_axis_tready asserted (adapter accepting)", $time);
+            end
+        end
+    end
+
+    //--------------------------------------------------------------------------
+    // GPIO Result Monitor — auto-terminate on CPU PASS/FAIL
+    //--------------------------------------------------------------------------
+    // GPIO[6] = result_valid, GPIO[5] = result (1=PASS, 0=FAIL)
+    // CPU asserts GPIO[6] after test completes.  Testbench reads GPIO[5]
+    // and calls $finish immediately — no waiting for timeout.
+
+    reg result_valid_prev;
+    always @(posedge sim_clock_100MHz) begin
+        result_valid_prev <= dut.Top_i.NEORV32_RISC_V.gpio_o[6];
+        if (dut.Top_i.NEORV32_RISC_V.gpio_o[6] && !result_valid_prev) begin
+            if (dut.Top_i.NEORV32_RISC_V.gpio_o[5]) begin
+                $display("[%0t] TEST PASSED (GPIO result)", $time);
+            end else begin
+                $display("[%0t] TEST FAILED (GPIO result)", $time);
+            end
+            $display("  Total samples sent: %0d", samples_sent);
+            #100;  // Let final signals settle
+            $finish;
+        end
+    end
+
+    // GPIO milestone monitors
+    reg [7:0] gpio_prev;
+    always @(posedge sim_clock_100MHz) begin
+        gpio_prev <= dut.Top_i.NEORV32_RISC_V.gpio_o[7:0];
+        if (dut.Top_i.NEORV32_RISC_V.gpio_o[2] && !gpio_prev[2])
+            $display("[%0t] MILESTONE: AD9361 core configured (GPIO[2])", $time);
+        if (dut.Top_i.NEORV32_RISC_V.gpio_o[3] && !gpio_prev[3])
+            $display("[%0t] MILESTONE: TX burst complete (GPIO[3])", $time);
+        if (dut.Top_i.NEORV32_RISC_V.gpio_o[4] && !gpio_prev[4])
+            $display("[%0t] MILESTONE: RX readback done (GPIO[4])", $time);
+    end
+
+    //--------------------------------------------------------------------------
     // TX Data Monitoring
     //--------------------------------------------------------------------------
 
@@ -437,13 +627,15 @@ module vivado_tb;
         $display("==============================================");
 
         // Wait for simulation to complete or timeout
-        // 50ms should be enough for multiple loops of 1024 samples
-        #50_000_000;  // 50ms timeout
+        // Normal completion via GPIO auto-terminate (~2ms post-reset).
+        // This timeout is a safety net only.
+        #10_000_000;  // 10ms timeout
 
         $display("");
         $display("==============================================");
-        $display("  Simulation timeout reached (50ms)");
+        $display("  Simulation timeout reached (10ms)");
         $display("  Total samples sent: %0d", samples_sent);
+        $display("  WARNING: CPU did not signal PASS/FAIL via GPIO");
         $display("==============================================");
         $finish;
     end

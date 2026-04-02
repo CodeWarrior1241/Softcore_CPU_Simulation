@@ -746,6 +746,7 @@ create_bd_cell -type ip -vlnv xilinx.com:ip:axis_data_fifo:2.0 $ad9361_cdc_tx_st
 set_property -dict [list CONFIG.HAS_TLAST.VALUE_SRC USER] [get_bd_cells $ad9361_cdc_tx_streaming_fifo]
 set_property -dict [list \
     CONFIG.FIFO_DEPTH {256} \
+    CONFIG.HAS_TLAST {1} \
     CONFIG.IS_ACLK_ASYNC {1} \
 ] [get_bd_cells $ad9361_cdc_tx_streaming_fifo]
 
@@ -763,6 +764,7 @@ create_bd_cell -type ip -vlnv xilinx.com:ip:axis_data_fifo:2.0 $ad9361_cdc_rx_st
 set_property -dict [list CONFIG.HAS_TLAST.VALUE_SRC USER] [get_bd_cells $ad9361_cdc_rx_streaming_fifo]
 set_property -dict [list \
     CONFIG.FIFO_DEPTH {256} \
+    CONFIG.HAS_TLAST {1} \
     CONFIG.IS_ACLK_ASYNC {1} \
 ] [get_bd_cells $ad9361_cdc_rx_streaming_fifo]
 

@@ -22,7 +22,7 @@ do compile.do
 
 # Default simulation time (can be overridden from command line)
 if {![info exists SIM_TIME]} {
-    set SIM_TIME "50ms"
+    set SIM_TIME "10ms"
 }
 
 # Detailed mode: "yes" = full signal visibility (+acc=npr) with waveforms
@@ -32,8 +32,8 @@ if {![info exists DETAILED]} {
 }
 
 if {$DETAILED eq "yes"} {
-    set acc_flag "+acc=npr"
-    set mode_str "DETAILED (+acc=npr, waveforms enabled)"
+    set acc_flag "+acc"
+    set mode_str "DETAILED (+acc, full signal visibility)"
 } else {
     set acc_flag "+acc=rn"
     set mode_str "FAST (+acc=rn, no waveforms)"
@@ -152,6 +152,16 @@ add wave -divider "COE Data"
 add wave -hex /vivado_tb/current_i
 add wave -hex /vivado_tb/current_q
 
+add wave -divider "UUT Internal - AD9361 Control Path"
+catch {
+    add wave -hex /vivado_tb/dut/Top_i/gpio_up_enable_slice_Dout
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361/up_enable
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361/up_txnrx
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adc_valid_i0
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adc_valid_q0
+    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361/l_clk
+}
+
 add wave -divider "UUT Internal - Clock Wizard"
 catch {
     add wave -hex /vivado_tb/dut/Top_i/ECS_Clock_300MHz/clk_out1
@@ -217,8 +227,10 @@ catch {
     add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_tx_streaming_fifo/m_axis_aclk
     add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_tx_streaming_fifo/s_axis_tvalid
     add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_tx_streaming_fifo/s_axis_tready
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_tx_streaming_fifo/s_axis_tlast
     add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_tx_streaming_fifo/m_axis_tvalid
     add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_tx_streaming_fifo/m_axis_tready
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_tx_streaming_fifo/m_axis_tlast
 }
 
 add wave -divider "UUT Internal - RX CDC FIFO"
@@ -227,8 +239,10 @@ catch {
     add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_rx_streaming_fifo/m_axis_aclk
     add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_rx_streaming_fifo/s_axis_tvalid
     add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_rx_streaming_fifo/s_axis_tready
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_rx_streaming_fifo/s_axis_tlast
     add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_rx_streaming_fifo/m_axis_tvalid
     add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_rx_streaming_fifo/m_axis_tready
+    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_rx_streaming_fifo/m_axis_tlast
 }
 
 add wave -divider "UUT Internal - Ctrl CDC FIFO (open-logic)"

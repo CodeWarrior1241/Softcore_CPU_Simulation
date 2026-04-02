@@ -10,7 +10,7 @@
 #include "parameters.h"
 #include "neorv32_no_os_spi.h"
 #include "neorv32_no_os_gpio.h"
-#include "axi_ad9361_adapter_ctrl.h"
+#include "axi_streaming_adapter_ctrl.h"
 #include "qpsk_tx_data.h"
 
 /* ---------- UART command interface ---------- */
@@ -388,7 +388,46 @@ int main(void)
 	}
 	neorv32_uart0_puts("[ad9361_no-os] ENSM -> FDD\n");
 
-	/* 6. Start streaming adapter bridge and configure datapath */
+	/* 6. Configure axi_ad9361 FPGA core registers */
+	/* The ad9361_init() above configures the AD9361 transceiver via SPI,
+	   but the axi_ad9361 FPGA core also needs AXI-Lite register writes to
+	   enable its internal ADC/DAC channels.  Without this, adc_valid never
+	   asserts and no data flows through the datapath. */
+	neorv32_uart0_puts("[ad9361_no-os] Configuring axi_ad9361 FPGA core...\n");
+
+#define AD9361_REG(off)  (*(volatile uint32_t *)(AXI_AD9361_BASE + (off)))
+
+	/* ADC/DAC common control: DDR mode, 2R2T */
+	AD9361_REG(0x0044) = 0x00000000;  /* ADC common control */
+	AD9361_REG(0x4048) = 0x00000000;  /* DAC common control 2 */
+	AD9361_REG(0x404C) = 0x00000003;  /* DAC rate (rate-1 = 3 for 2R2T) */
+
+	/* DAC channels: DMA data source (external data, not internal DDS) */
+	AD9361_REG(0x4418) = 0x00000002;  /* DAC ch0 I */
+	AD9361_REG(0x4458) = 0x00000002;  /* DAC ch0 Q */
+	AD9361_REG(0x4498) = 0x00000002;  /* DAC ch1 I */
+	AD9361_REG(0x44D8) = 0x00000002;  /* DAC ch1 Q */
+
+	/* ADC channels: enable + signed format */
+	AD9361_REG(0x0400) = 0x00000051;  /* ADC ch0 I */
+	AD9361_REG(0x0440) = 0x00000051;  /* ADC ch0 Q */
+	AD9361_REG(0x0480) = 0x00000051;  /* ADC ch1 I */
+	AD9361_REG(0x04C0) = 0x00000051;  /* ADC ch1 Q */
+
+	/* Trigger SYNC */
+	AD9361_REG(0x4044) = 0x00000001;  /* DAC sync */
+	AD9361_REG(0x0044) = 0x00000001;  /* ADC sync */
+
+	/* Release resets (bit0=resetn, bit1=mmcm_resetn) */
+	AD9361_REG(0x0040) = 0x00000003;  /* ADC common reset */
+	AD9361_REG(0x4040) = 0x00000003;  /* DAC common reset */
+
+	/* Wait for CDC transfers to complete (~20µs) */
+	for (volatile int i = 0; i < 2000; i++) {}
+
+	neorv32_uart0_puts("[ad9361_no-os] axi_ad9361 FPGA core configured\n");
+
+	/* 7. Start streaming adapter bridge and configure datapath */
 	neorv32_uart0_puts("[ad9361_no-os] Configuring streaming adapter bridge...\n");
 
 	/* Start ap_ctrl_chain (must be called once before any register access) */
@@ -413,19 +452,19 @@ int main(void)
 			     (unsigned)QPSK_TX_NUM_SAMPLES);
 	neorv32_uart0_puts("[ad9361_no-os] Adapter enabled (TX + RX)\n");
 
-	/* 7. Assert up_enable and up_txnrx (data path enable) */
+	/* 8. Assert up_enable and up_txnrx (data path enable) */
 	neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 1);
 	neorv32_gpio_pin_set(GPIO_UP_TXNRX_PIN, 1);
 	neorv32_uart0_puts("[ad9361_no-os] Data path enabled (up_enable=1, up_txnrx=1)\n");
 
-	/* 8. Read back LO frequencies */
+	/* 9. Read back LO frequencies */
 	ad9361_get_rx_lo_freq(phy, &rx_lo);
 	ad9361_get_tx_lo_freq(phy, &tx_lo);
 	neorv32_uart0_printf("[ad9361_no-os] RX LO: %u MHz, TX LO: %u MHz\n",
 			     (unsigned)(rx_lo / 1000000ULL),
 			     (unsigned)(tx_lo / 1000000ULL));
 
-	/* 9. UART command loop */
+	/* 10. UART command loop */
 	neorv32_uart0_puts("[ad9361_no-os] Ready — awaiting commands\n");
 	char cmd_buffer[CMD_BUFFER_SIZE];
 
@@ -447,16 +486,37 @@ int main(void)
 			neorv32_uart0_puts(RESP_RF_DISABLED);
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_ENABLE_SNAPSHOT)) {
-			/* Clear RX buffer, then trigger drain and wait for RX data */
+			/* Clear RX buffer */
 			BRIDGE_REG(BRIDGE_REG_CTRL) =
 				BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_TX_ENABLE | BRIDGE_CTRL_RX_ENABLE | BRIDGE_CTRL_RX_CLEAR;
-			/* Wait for RX buffer to fill and bridge to signal RX_READY */
-			if (!bridge_wait_rx_ready()) {
+			/* Remove RX_CLEAR, let BRAM fill with ADC samples */
+			BRIDGE_REG(BRIDGE_REG_CTRL) =
+				BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_TX_ENABLE | BRIDGE_CTRL_RX_ENABLE;
+			/* Poll rx_fill until BRAM is full (1024 samples) */
+			int snapshot_ready = 0;
+			for (int i = 0; i < BRIDGE_POLL_TIMEOUT; i++) {
+				if (BRIDGE_REG(BRIDGE_REG_RX_FILL) >= BRIDGE_SAMPLE_DEPTH) {
+					snapshot_ready = 1;
+					break;
+				}
+			}
+			if (!snapshot_ready) {
 				neorv32_uart0_puts("snapshot_timeout\n");
 			} else {
-				neorv32_uart0_puts(RESP_SNAPSHOT);
-				send_rx_snapshot();
-				bridge_release_rx();
+				/* Assert RX_DRAIN to push full BRAM through CDC FIFO */
+				BRIDGE_REG(BRIDGE_REG_CTRL) =
+					BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_TX_ENABLE | BRIDGE_CTRL_RX_ENABLE | BRIDGE_CTRL_RX_DRAIN;
+				/* Wait for bridge to receive complete burst */
+				if (!bridge_wait_rx_ready()) {
+					neorv32_uart0_puts("snapshot_timeout\n");
+				} else {
+					/* Clear RX_DRAIN before reading */
+					BRIDGE_REG(BRIDGE_REG_CTRL) =
+						BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_TX_ENABLE | BRIDGE_CTRL_RX_ENABLE;
+					neorv32_uart0_puts(RESP_SNAPSHOT);
+					send_rx_snapshot();
+					bridge_release_rx();
+				}
 			}
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_GET_STATUS)) {

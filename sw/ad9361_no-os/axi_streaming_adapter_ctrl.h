@@ -1,25 +1,24 @@
 /*
- * axi_ad9361_adapter_ctrl.h - Register-level control for the
+ * axi_streaming_adapter_ctrl.h - Register-level control for the
  * axi_lite_to_streaming_adapter HLS IP (v1.0)
  *
- * This replaces the old direct-register axi_ad9361_adapter interface.
- * The v4.0 adapter uses AXI-Stream + ap_none, so all CPU access goes
- * through this streaming adapter bridge at 0x44A10000.
+ * Bare-metal register access via volatile pointers.
+ * Register offsets from HLS-generated xaxi_lite_to_streaming_adapter_hw.h.
  *
  * The bridge uses ap_ctrl_chain: software must write AP_START + AUTO_RESTART
  * once at init to start continuous operation.
- *
- * Register offsets from HLS-generated xaxi_lite_to_streaming_adapter_hw.h.
  */
 
-#ifndef AXI_AD9361_ADAPTER_CTRL_H
-#define AXI_AD9361_ADAPTER_CTRL_H
+#ifndef AXI_STREAMING_ADAPTER_CTRL_H
+#define AXI_STREAMING_ADAPTER_CTRL_H
 
 #include <stdint.h>
-#include "parameters.h"
+
+/* ---------- Base address ---------- */
+#define AXI_STREAMING_ADAPTER_BASE  0x44A10000UL
 
 /* ---------- Helper macros ---------- */
-#define BRIDGE_REG(off)  (*(volatile uint32_t *)(AXI_AD9361_ADAPTER_BASE + (off)))
+#define BRIDGE_REG(off)  (*(volatile uint32_t *)(AXI_STREAMING_ADAPTER_BASE + (off)))
 
 /* ---------- AP control (ap_ctrl_chain handshake) ---------- */
 #define BRIDGE_REG_AP_CTRL            0x0000
@@ -89,7 +88,7 @@
 #define ADAPTER_RX_STATUS_OVERFLOW    (1U << 0)
 #define ADAPTER_RX_STATUS_VALID       (1U << 1)
 
-/* ---------- Timeout for polling ---------- */
+/* ---------- Polling timeout ---------- */
 #define BRIDGE_POLL_TIMEOUT           500000
 
 /* ---------- Inline helpers ---------- */
@@ -103,7 +102,7 @@ static inline void bridge_start(void)
 /* Load TX sample buffer from a uint32_t array. */
 static inline void bridge_load_tx_data(const uint32_t *data, uint32_t num_samples)
 {
-    volatile uint32_t *bram = (volatile uint32_t *)(AXI_AD9361_ADAPTER_BASE + BRIDGE_TX_DATA_BASE);
+    volatile uint32_t *bram = (volatile uint32_t *)(AXI_STREAMING_ADAPTER_BASE + BRIDGE_TX_DATA_BASE);
     for (uint32_t i = 0; i < num_samples; i++) {
         bram[i] = data[i];
     }
@@ -133,7 +132,7 @@ static inline int bridge_wait_rx_ready(void)
 /* Read one word from RX sample buffer. */
 static inline uint32_t bridge_read_rx_sample(uint32_t index)
 {
-    volatile uint32_t *bram = (volatile uint32_t *)(AXI_AD9361_ADAPTER_BASE + BRIDGE_RX_DATA_BASE);
+    volatile uint32_t *bram = (volatile uint32_t *)(AXI_STREAMING_ADAPTER_BASE + BRIDGE_RX_DATA_BASE);
     return bram[index];
 }
 
@@ -143,4 +142,4 @@ static inline void bridge_release_rx(void)
     BRIDGE_REG(BRIDGE_REG_RX_READ_CNT_I) = BRIDGE_SAMPLE_DEPTH;
 }
 
-#endif /* AXI_AD9361_ADAPTER_CTRL_H */
+#endif /* AXI_STREAMING_ADAPTER_CTRL_H */

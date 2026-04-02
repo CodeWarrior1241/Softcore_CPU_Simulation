@@ -15,7 +15,6 @@
 
 /* AXI peripheral base addresses (from build_all.tcl) */
 #define AXI_AD9361_BASE         0x44A00000UL
-#define AXI_AD9361_ADAPTER_BASE 0x44A10000UL
 #define BRAM_BASE               0xC0000000UL
 
 /* System clocks */
