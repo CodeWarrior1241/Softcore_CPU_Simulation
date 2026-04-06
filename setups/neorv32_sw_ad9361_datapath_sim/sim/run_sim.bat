@@ -28,7 +28,7 @@ setlocal enabledelayedexpansion
 REM Configuration
 set VSIM="C:\Program Files\Mentor_Graphics\Questa_Prime_2025.1\win64\vsim.exe"
 set SIM_MODE=gui
-set SIM_TIME=10ms
+set SIM_TIME=5ms
 set DETAILED=no
 
 REM Change to script directory
@@ -75,7 +75,7 @@ if "%~1"=="--help" (
     echo Usage: run_sim.bat [options]
     echo.
     echo Options:
-    echo   --time TIME    Set simulation time (default: 50ms)
+    echo   --time TIME    Set simulation time (default: 5ms)
     echo   --gui          Run in GUI mode (default)
     echo   --batch        Run in batch/command-line mode
     echo   --detailed     Full signal visibility (+acc=npr) with waveforms
@@ -83,7 +83,7 @@ if "%~1"=="--help" (
     echo   --help         Show this help message
     echo.
     echo Examples:
-    echo   run_sim.bat                       Run fast (50ms, GUI, +acc=rn)
+    echo   run_sim.bat                       Run fast (5ms, GUI, +acc=rn)
     echo   run_sim.bat --detailed            Run with full waveforms
     echo   run_sim.bat --time 5ms --batch    Run 5ms in batch mode
     exit /b 0

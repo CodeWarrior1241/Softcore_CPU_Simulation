@@ -123,7 +123,7 @@ add wave -divider "Clock & Reset"
 add wave -hex /vivado_tb/ecs_clk_in_p
 add wave -hex /vivado_tb/ecs_clk_in_n
 add wave -hex /vivado_tb/system_resetn
-add wave -hex /vivado_tb/sim_clock_100MHz_locked
+add wave -hex /vivado_tb/sim_clock_150MHz_locked
 
 add wave -divider "UART Signals"
 add wave -hex /vivado_tb/uart0_txd
@@ -199,16 +199,6 @@ catch {
     add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/dac_dunf
 }
 
-add wave -divider "UUT Internal - AD9361 Adapter Control/Status"
-catch {
-    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/ctrl_data_in
-    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/ctrl_valid_in
-    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/ctrl_ready_out
-    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/status_data_out
-    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/status_valid_out
-    add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/status_ready_in
-}
-
 add wave -divider "UUT Internal - AD9361 Adapter AXI-Stream"
 catch {
     add wave -hex /vivado_tb/dut/Top_i/axi_ad9361_adapter/tx_stream_TDATA
@@ -245,34 +235,14 @@ catch {
     add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_rx_streaming_fifo/m_axis_tlast
 }
 
-add wave -divider "UUT Internal - Ctrl CDC FIFO (open-logic)"
-catch {
-    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_ctrl_fifo/In_Valid
-    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_ctrl_fifo/In_Ready
-    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_ctrl_fifo/Out_Valid
-    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_ctrl_fifo/Out_Ready
-    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_ctrl_fifo/In_Data
-    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_ctrl_fifo/Out_Data
-}
-
-add wave -divider "UUT Internal - Status CDC FIFO (open-logic)"
-catch {
-    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_status_fifo/In_Valid
-    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_status_fifo/In_Ready
-    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_status_fifo/Out_Valid
-    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_status_fifo/Out_Ready
-    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_status_fifo/In_Data
-    add wave -hex /vivado_tb/dut/Top_i/ad9361_cdc_status_fifo/Out_Data
-}
-
-add wave -divider "UUT Internal - Streaming Adapter (100 MHz)"
+add wave -divider "UUT Internal - Streaming Adapter (150 MHz)"
 catch {
     add wave -hex /vivado_tb/dut/Top_i/axi_streaming_adapter/ap_clk
     add wave -hex /vivado_tb/dut/Top_i/axi_streaming_adapter/ap_rst_n
-    add wave -hex /vivado_tb/dut/Top_i/axi_streaming_adapter/ctrl_data_out
-    add wave -hex /vivado_tb/dut/Top_i/axi_streaming_adapter/ctrl_valid_out
-    add wave -hex /vivado_tb/dut/Top_i/axi_streaming_adapter/status_data_in
-    add wave -hex /vivado_tb/dut/Top_i/axi_streaming_adapter/status_valid_in
+    add wave -hex /vivado_tb/dut/Top_i/axi_streaming_adapter/state
+    add wave -hex /vivado_tb/dut/Top_i/axi_streaming_adapter/tx_ptr
+    add wave -hex /vivado_tb/dut/Top_i/axi_streaming_adapter/rx_ptr
+    add wave -hex /vivado_tb/dut/Top_i/axi_streaming_adapter/rx_buffer_ready
 }
 
 configure wave -namecolwidth 400

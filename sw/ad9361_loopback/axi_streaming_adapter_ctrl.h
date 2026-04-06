@@ -1,12 +1,25 @@
 /*
  * axi_streaming_adapter_ctrl.h - Register-level control for the
- * axi_lite_to_streaming_adapter HLS IP (v1.0)
+ * axi_lite_to_streaming_adapter HLS IP (v3.0)
  *
- * Bare-metal register access via volatile pointers.
- * Register offsets from HLS-generated xaxi_lite_to_streaming_adapter_hw.h.
+ * State-machine bridge: IDLE → INIT → SEND_AND_RECEIVE → RECEIVE
+ * ap_ctrl_none, II=1.  Control via ctrl_regs_t struct, status via
+ * status_regs_t struct, both on a single s_axi_ctrl AXI-Lite port.
  *
- * The bridge uses ap_ctrl_chain: software must write AP_START + AUTO_RESTART
- * once at init to start continuous operation.
+ * Register map (from HLS-generated ctrl_s_axi.v):
+ *   ctrl_r (CPU writes):
+ *     0x0010: enable          [31:0]
+ *     0x0014: rx_read_done    [63:32]
+ *     0x0018: reset           [95:64]
+ *   status (CPU reads):
+ *     0x0020: state           [31:0]
+ *     0x0024: tx_sample_count [63:32]
+ *     0x0028: rx_sample_count [95:64]
+ *   tx_data[1024]:  0x1000-0x1FFF
+ *   rx_data[1024]:  0x2000-0x2FFF
+ *
+ * CPU protocol for ctrl pulses (edge-detect arming in HLS):
+ *   Write 1, wait for effect, write 0 to re-arm.
  */
 
 #ifndef AXI_STREAMING_ADAPTER_CTRL_H
@@ -20,70 +33,39 @@
 /* ---------- Helper macros ---------- */
 #define BRIDGE_REG(off)  (*(volatile uint32_t *)(AXI_STREAMING_ADAPTER_BASE + (off)))
 
-/* ---------- AP control (ap_ctrl_chain handshake) ---------- */
-#define BRIDGE_REG_AP_CTRL            0x0000
-#define BRIDGE_AP_START               (1U << 0)
-#define BRIDGE_AP_DONE                (1U << 1)
-#define BRIDGE_AP_IDLE                (1U << 2)
-#define BRIDGE_AP_READY               (1U << 3)
-#define BRIDGE_AP_AUTO_RESTART        (1U << 7)
+/* ---------- ctrl_r registers (CPU writes) ---------- */
+#define BRIDGE_REG_ENABLE           0x0010
+#define BRIDGE_REG_RX_READ_DONE     0x0014
+#define BRIDGE_REG_RESET            0x0018
 
-/* ---------- Control registers (R/W, passed through to adapter) ---------- */
-#define BRIDGE_REG_CTRL               0x0010
-#define BRIDGE_REG_RX_CTRL            0x0018
-#define BRIDGE_REG_TX_CTRL            0x0020
-#define BRIDGE_REG_LOOPBACK           0x0028
-#define BRIDGE_REG_SCRATCH            0x0030
+/* ---------- status registers (CPU reads) ---------- */
+#define BRIDGE_REG_STATE            0x0020
+#define BRIDGE_REG_TX_COUNT         0x0024
+#define BRIDGE_REG_RX_COUNT         0x0028
 
-/* ---------- Status registers (read-only, from adapter) ---------- */
-#define BRIDGE_REG_STATUS             0x0038
-#define BRIDGE_REG_RX_STATUS          0x0048
-#define BRIDGE_REG_RX_FILL            0x0058
-#define BRIDGE_REG_TX_STATUS          0x0068
-
-/* ---------- Bridge internal registers ---------- */
-#define BRIDGE_REG_TX_COUNT_I         0x0078  /* Write: set to 1024 to trigger TX burst */
-#define BRIDGE_REG_TX_COUNT_O         0x0080  /* Read: current TX counter (0 when idle) */
-#define BRIDGE_REG_RX_READ_CNT_I      0x0088  /* Write: set to 1024 to free RX slot */
-#define BRIDGE_REG_RX_READ_CNT_O      0x0090  /* Read: current RX read counter */
-#define BRIDGE_REG_BRIDGE_STATUS      0x0098  /* Read: bridge state bits */
+/* ---------- State enum values ---------- */
+#define BRIDGE_STATE_IDLE           0
+#define BRIDGE_STATE_INIT           1
+#define BRIDGE_STATE_SEND_AND_RX    2
+#define BRIDGE_STATE_RECEIVE        3
 
 /* ---------- Data memory arrays ---------- */
-#define BRIDGE_TX_DATA_BASE           0x1000  /* TX sample buffer (1024 x 32-bit) */
-#define BRIDGE_RX_DATA_BASE           0x2000  /* RX sample buffer (1024 x 32-bit) */
-#define BRIDGE_SAMPLE_DEPTH           1024
-
-/* ---------- CTRL register bit positions ---------- */
-#define BRIDGE_CTRL_ENABLE            (1U << 0)
-#define BRIDGE_CTRL_SOFT_RESET        (1U << 1)
-#define BRIDGE_CTRL_RX_ENABLE         (1U << 2)
-#define BRIDGE_CTRL_TX_ENABLE         (1U << 3)
-#define BRIDGE_CTRL_RX_CLEAR          (1U << 8)
-#define BRIDGE_CTRL_RX_DRAIN          (1U << 9)
-
-/* ---------- Channel enable masks (RX_CTRL / TX_CTRL) ---------- */
-#define BRIDGE_CH_EN_I0               (1U << 0)
-#define BRIDGE_CH_EN_Q0               (1U << 1)
-#define BRIDGE_CH_EN_I1               (1U << 2)
-#define BRIDGE_CH_EN_Q1               (1U << 3)
-#define BRIDGE_CH_EN_ALL              (BRIDGE_CH_EN_I0 | BRIDGE_CH_EN_Q0 | BRIDGE_CH_EN_I1 | BRIDGE_CH_EN_Q1)
-#define BRIDGE_CH_CLR_OVF             (1U << 8)
-#define BRIDGE_CH_CLR_UNF             (1U << 8)
-
-/* ---------- Bridge status bit positions ---------- */
-#define BRIDGE_STATUS_TX_SENDING      (1U << 0)
-#define BRIDGE_STATUS_RX_READY        (1U << 1)
-#define BRIDGE_STATUS_RX_READING      (1U << 2)
+#define BRIDGE_TX_DATA_BASE         0x1000
+#define BRIDGE_RX_DATA_BASE         0x2000
+#define BRIDGE_SAMPLE_DEPTH         1024
 
 /* ---------- Inline helpers ---------- */
 
-/* Start the bridge (ap_ctrl_chain): call once at init. */
-static inline void bridge_start(void)
+/* Pulse a ctrl register: write 1, brief delay, write 0.
+ * HLS edge-detect arming ensures one trigger per 0→1→0 transition. */
+static inline void bridge_ctrl_pulse(uint32_t offset)
 {
-    BRIDGE_REG(BRIDGE_REG_AP_CTRL) = BRIDGE_AP_START | BRIDGE_AP_AUTO_RESTART;
+    BRIDGE_REG(offset) = 1;
+    for (volatile int i = 0; i < 10; i++) {}
+    BRIDGE_REG(offset) = 0;
 }
 
-/* Load TX sample buffer from a uint32_t array. */
+/* Load TX sample buffer. */
 static inline void bridge_load_tx_data(const uint32_t *data, uint32_t num_samples)
 {
     volatile uint32_t *bram = (volatile uint32_t *)(AXI_STREAMING_ADAPTER_BASE + BRIDGE_TX_DATA_BASE);
@@ -92,10 +74,11 @@ static inline void bridge_load_tx_data(const uint32_t *data, uint32_t num_sample
     }
 }
 
-/* Trigger TX burst after loading samples. */
-static inline void bridge_trigger_tx(uint32_t num_samples)
+/* Enable bridge: pulse enable, wait for RECEIVE state. */
+static inline void bridge_enable_and_wait(void)
 {
-    BRIDGE_REG(BRIDGE_REG_TX_COUNT_I) = num_samples;
+    bridge_ctrl_pulse(BRIDGE_REG_ENABLE);
+    while (BRIDGE_REG(BRIDGE_REG_STATE) != BRIDGE_STATE_RECEIVE) {}
 }
 
 /* Read one word from RX sample buffer. */
@@ -105,10 +88,16 @@ static inline uint32_t bridge_read_rx_sample(uint32_t index)
     return bram[index];
 }
 
-/* Signal that all RX samples have been read, freeing the slot. */
-static inline void bridge_release_rx(void)
+/* Signal that SW has read all RX samples — release buffer. */
+static inline void bridge_rx_read_done(void)
 {
-    BRIDGE_REG(BRIDGE_REG_RX_READ_CNT_I) = BRIDGE_SAMPLE_DEPTH;
+    bridge_ctrl_pulse(BRIDGE_REG_RX_READ_DONE);
+}
+
+/* Reset bridge to IDLE state. */
+static inline void bridge_reset(void)
+{
+    bridge_ctrl_pulse(BRIDGE_REG_RESET);
 }
 
 #endif /* AXI_STREAMING_ADAPTER_CTRL_H */

@@ -11,6 +11,16 @@
  * All progress signaling via GPIO (zero sim-time cost).  UART used only
  * for a single final "P" (pass) or "F" (fail) character.
  *
+ * The ad9361_adapter (v5.0) is a pure datapath — no software configuration.
+ * TX: AXI-Stream → BRAM → continuous DAC playback
+ * RX: ADC capture → BRAM → auto-drain to AXI-Stream when full (1024)
+ *
+ * The streaming_adapter (v3.0) is a state-machine bridge:
+ *   IDLE → INIT_QPSK_DATA → SEND_AND_RECEIVE_QPSK_DATA → RECEIVE_QPSK_DATA
+ * CPU writes tx_data[], pulses enable, bridge bursts TX and captures RX.
+ * CPU reads rx_data[], pulses rx_read_done to release buffer for next capture.
+ * CPU pulses reset to return to IDLE (for TX pattern reload).
+ *
  * GPIO output bit assignments:
  *   [0] up_enable    (AD9361 control — directly wired to axi_ad9361)
  *   [1] up_txnrx     (AD9361 control — directly wired to axi_ad9361)
@@ -78,20 +88,9 @@
 /** Number of RX readback cycles to perform before declaring success */
 #define NUM_READBACK_CYCLES 3
 
-/** Timeout: max polling iterations waiting for RX_READY */
-#define RX_READY_TIMEOUT 500000
+/** Timeout: max polling iterations */
+#define POLL_TIMEOUT 500000
 /**@}*/
-
-
-static int wait_rx_ready(void) {
-  for (int i = 0; i < RX_READY_TIMEOUT; i++) {
-    uint32_t bs = BRIDGE_REG(BRIDGE_REG_BRIDGE_STATUS);
-    if (bs & BRIDGE_STATUS_RX_READY) {
-      return 1;
-    }
-  }
-  return 0;
-}
 
 
 // Read 1024 RX samples, return count of non-zero samples.
@@ -142,25 +141,14 @@ int main(void) {
   neorv32_gpio_pin_set(GPIO_AD9361_DONE, 1);  // Milestone: core configured
 
   // ==================================================================
-  // Start streaming adapter and configure datapath
+  // Enable AD9361 TX/RX via GPIO
   // ==================================================================
 
-  bridge_start();
-
-  BRIDGE_REG(BRIDGE_REG_RX_CTRL) = BRIDGE_CH_EN_ALL;
-  BRIDGE_REG(BRIDGE_REG_TX_CTRL) = BRIDGE_CH_EN_ALL;
-  BRIDGE_REG(BRIDGE_REG_LOOPBACK) = 1;
-  BRIDGE_REG(BRIDGE_REG_CTRL) = BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_RX_ENABLE |
-                                  BRIDGE_CTRL_TX_ENABLE;
-  // Note: RX_DRAIN is NOT asserted here.  It is pulsed per-cycle in the
-  // readback loop below, after clearing the buffer and allowing it to fill.
-
-  // Enable AD9361 TX/RX via GPIO
   neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 1);
   neorv32_gpio_pin_set(GPIO_UP_TXNRX_PIN, 1);
 
   // ==================================================================
-  // TX: load 1024 samples and trigger burst
+  // TX: load 1024 samples, enable bridge → SEND → RECEIVE
   // ==================================================================
 
   volatile uint32_t *tx_buf = (volatile uint32_t *)(AXI_STREAMING_ADAPTER_BASE + BRIDGE_TX_DATA_BASE);
@@ -169,45 +157,45 @@ int main(void) {
     tx_buf[i] = sample;
   }
 
-  bridge_trigger_tx(BRIDGE_SAMPLE_DEPTH);
-  for (int i = 0; i < RX_READY_TIMEOUT; i++) {
-    if (BRIDGE_REG(BRIDGE_REG_TX_COUNT_O) == 0) break;
-  }
+  bridge_enable_and_wait();  // Pulses enable, waits for RECEIVE state
 
   neorv32_gpio_pin_set(GPIO_TX_DONE, 1);  // Milestone: TX complete
 
   // ==================================================================
-  // RX: readback cycles — wait, read, verify, release
+  // RX: readback cycles — wait for buffer full, read, verify, release
+  //
+  // The ad9361_adapter auto-drains its BRAM into rx_stream when full.
+  // The streaming adapter captures 1024 samples into rx_data[].
+  // CPU reads the snapshot, pulses rx_read_done to release buffer.
   // ==================================================================
 
   int pass_count = 0;
 
   for (int cycle = 0; cycle < NUM_READBACK_CYCLES; cycle++) {
-    // Clear RX buffer and let it fill with ADC samples
-    BRIDGE_REG(BRIDGE_REG_CTRL) = BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_RX_ENABLE |
-                                    BRIDGE_CTRL_TX_ENABLE | BRIDGE_CTRL_RX_CLEAR;
-    // Remove RX_CLEAR, let BRAM fill
-    BRIDGE_REG(BRIDGE_REG_CTRL) = BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_RX_ENABLE |
-                                    BRIDGE_CTRL_TX_ENABLE;
-    // Poll rx_fill until BRAM is full
-    for (int i = 0; i < RX_READY_TIMEOUT; i++) {
-      if (BRIDGE_REG(BRIDGE_REG_RX_FILL) >= BRIDGE_SAMPLE_DEPTH) break;
+
+    // Wait for RX buffer full (rx_sample_count reaches 1024)
+    int rx_ok = 0;
+    for (int i = 0; i < POLL_TIMEOUT; i++) {
+      if (BRIDGE_REG(BRIDGE_REG_RX_COUNT) >= BRIDGE_SAMPLE_DEPTH) {
+        rx_ok = 1;
+        break;
+      }
     }
+    if (!rx_ok) continue;  // Timeout — skip this cycle
 
-    // Pulse RX_DRAIN to trigger burst from full BRAM
-    BRIDGE_REG(BRIDGE_REG_CTRL) = BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_RX_ENABLE |
-                                    BRIDGE_CTRL_TX_ENABLE | BRIDGE_CTRL_RX_DRAIN;
-
-    if (!wait_rx_ready()) continue;
-
-    // Clear RX_DRAIN before reading
-    BRIDGE_REG(BRIDGE_REG_CTRL) = BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_RX_ENABLE |
-                                    BRIDGE_CTRL_TX_ENABLE;
-
+    // Cycle 0 is a dummy warm-up cycle.  In loopback mode, the first
+    // 1024 RX samples are captured while the TX burst is still
+    // propagating through the DAC → LVDS → loopback → ADC pipeline,
+    // so they contain pre-loopback silence (zeros).  This is an
+    // artifact of the test topology — in real operation the ADC always
+    // has live antenna data and no warm-up is needed.  We still read
+    // and release the buffer to advance the state machine, but don't
+    // count it toward the pass criteria.
     int nonzero = readback_rx();
-    if (nonzero > 0) pass_count++;
+    if (cycle > 0 && nonzero > 0) pass_count++;
 
-    bridge_release_rx();
+    // Release RX buffer for next capture
+    bridge_rx_read_done();
   }
 
   neorv32_gpio_pin_set(GPIO_RX_DONE, 1);  // Milestone: RX done
@@ -216,7 +204,7 @@ int main(void) {
   // Signal result via GPIO — testbench auto-terminates on GPIO_RESULT_VALID
   // ==================================================================
 
-  int pass = (pass_count == NUM_READBACK_CYCLES);
+  int pass = (pass_count == (NUM_READBACK_CYCLES - 1));
 
   if (pass) {
     neorv32_gpio_pin_set(GPIO_RESULT, 1);

@@ -42,14 +42,12 @@ variable qpsk_snapshot_bram "QPSK_Snapshot_BRAM"
 variable axi_ad9361 "axi_ad9361"
 variable axi_ad9361_adapter "axi_ad9361_adapter"
 
-# AXI-Lite to Streaming adapter bridge (100 MHz domain)
+# AXI-Lite to Streaming adapter bridge (150 MHz domain)
 variable axi_streaming_adapter "axi_streaming_adapter"
 
-# AXI-Stream CDC FIFOs (100 MHz <-> 125 MHz l_clk)
+# AXI-Stream CDC FIFOs (150 MHz <-> 125 MHz l_clk)
 variable ad9361_cdc_tx_streaming_fifo "ad9361_cdc_tx_streaming_fifo"
 variable ad9361_cdc_rx_streaming_fifo "ad9361_cdc_rx_streaming_fifo"
-variable ad9361_cdc_ctrl_fifo "ad9361_cdc_ctrl_fifo"
-variable ad9361_cdc_status_fifo "ad9361_cdc_status_fifo"
 
 # Reset synchronizer for AD9361 l_clk domain
 variable util_ad9361_lclk_reset "util_ad9361_lclk_reset"
@@ -117,7 +115,6 @@ proc build_all {} {
     global axi_ad9361 axi_ad9361_adapter
     global axi_streaming_adapter
     global ad9361_cdc_tx_streaming_fifo ad9361_cdc_rx_streaming_fifo
-    global ad9361_cdc_ctrl_fifo ad9361_cdc_status_fifo
     global util_ad9361_lclk_reset
 
     # Read ADI IP directory from environment variable
@@ -187,44 +184,6 @@ puts ""
 set synth_sources_name [get_filesets -filter {FILESET_TYPE == "DesignSrcs"}]
 set sim_sources_name [get_filesets -filter {FILESET_TYPE == "SimulationSrcs"}]
 set impl_sources_name [get_filesets -filter {FILESET_TYPE == "Constrs"}]
-
-###############################################################################
-# Open-Logic VHDL Sources (olo_base_fifo_async wrapper for CDC)
-###############################################################################
-
-set olo_vhdl_dir [file normalize "$project_dir/../../../../deps/open-logic/src/base/vhdl"]
-set wrapper_dir  [file normalize "$project_dir/../../../../src/olo_base_fifo_async_wrapper"]
-
-if {![file exists $olo_vhdl_dir/olo_base_fifo_async.vhd]} {
-    puts "ERROR: Open-logic sources not found at $olo_vhdl_dir"
-    puts "       Ensure deps/open-logic submodule is initialized."
-    return -1
-}
-
-puts "INFO: Adding open-logic VHDL sources and FIFO wrapper..."
-
-# Open-logic dependencies require VHDL-2008 (unconstrained array elements)
-set olo_dep_files [list \
-    $olo_vhdl_dir/olo_base_pkg_array.vhd \
-    $olo_vhdl_dir/olo_base_pkg_attribute.vhd \
-    $olo_vhdl_dir/olo_base_pkg_math.vhd \
-    $olo_vhdl_dir/olo_base_pkg_logic.vhd \
-    $olo_vhdl_dir/olo_base_pkg_string.vhd \
-    $olo_vhdl_dir/olo_base_cc_bits.vhd \
-    $olo_vhdl_dir/olo_base_ram_sdp.vhd \
-    $olo_vhdl_dir/olo_base_cc_reset.vhd \
-    $olo_vhdl_dir/olo_base_fifo_async.vhd \
-]
-add_files -norecurse $olo_dep_files
-set_property file_type {VHDL 2008} [get_files $olo_dep_files]
-
-# Wrapper stays plain VHDL (required for module reference — Vivado rejects VHDL-2008 top)
-add_files -norecurse $wrapper_dir/olo_base_fifo_async_wrapper.vhd
-
-# Load open-logic scoped constraints for CDC timing (implementation only)
-# Applies set_max_delay -datapath_only and set_bus_skew to olo_base_cc_bits instances
-set olo_tcl_dir [file normalize "$olo_vhdl_dir/../tcl"]
-source $olo_tcl_dir/olo_base_constraints_amd.tcl
 
 # Create the top level block design
 create_bd_design $top_level_bd_name
@@ -417,7 +376,7 @@ create_bd_cell -type ip -vlnv NEORV32:user:neorv32_vivado_ip:1.0 $neorv32_cpu
 
 # Configure NEORV32 for AU15P / FMCOMMS4 application
 set_property -dict [list \
-    CONFIG.CLOCK_FREQUENCY {100000000} \
+    CONFIG.CLOCK_FREQUENCY {150000000} \
     CONFIG.BOOT_MODE_SELECT {2} \
     CONFIG.IMEM_EN {true} \
     CONFIG.IMEM_SIZE {32768} \
@@ -450,10 +409,7 @@ puts "INFO: NEORV32 configured (RV32IMC, 32KB IMEM, 16KB DMEM, TRACER enabled)"
 create_bd_cell -type ip -vlnv xilinx.com:ip:clk_wiz:6.0 $ecs_clock_300_mhz
 set_property -dict [list \
     CONFIG.AUTO_PRIMITIVE {PLL} \
-    CONFIG.CLKOUT1_JITTER {101.573} \
-    CONFIG.CLKOUT1_PHASE_ERROR {84.323} \
-    CONFIG.CLKOUT2_JITTER {81.816} \
-    CONFIG.CLKOUT2_PHASE_ERROR {84.323} \
+    CONFIG.CLKOUT1_REQUESTED_OUT_FREQ {150.000} \
     CONFIG.CLKOUT2_REQUESTED_OUT_FREQ {300.000} \
     CONFIG.CLKOUT2_USED {true} \
     CONFIG.CLKOUT2_DRIVES {Buffer} \
@@ -463,15 +419,7 @@ set_property -dict [list \
     CONFIG.CLKOUT6_DRIVES {Buffer} \
     CONFIG.CLKOUT7_DRIVES {Buffer} \
     CONFIG.FEEDBACK_SOURCE {FDBK_AUTO} \
-    CONFIG.MMCM_BANDWIDTH {OPTIMIZED} \
-    CONFIG.MMCM_CLKFBOUT_MULT_F {3} \
-    CONFIG.MMCM_CLKIN1_PERIOD {10.000} \
-    CONFIG.MMCM_CLKIN2_PERIOD {10.000} \
-    CONFIG.MMCM_CLKOUT0_DIVIDE_F {9} \
-    CONFIG.MMCM_CLKOUT1_DIVIDE {3} \
     CONFIG.NUM_OUT_CLKS {2} \
-    CONFIG.MMCM_COMPENSATION {AUTO} \
-    CONFIG.MMCM_DIVCLK_DIVIDE {1} \
     CONFIG.OPTIMIZE_CLOCKING_STRUCTURE_EN {true} \
     CONFIG.PRIMITIVE {Auto} \
     CONFIG.PRIM_IN_FREQ {100.000} \
@@ -480,7 +428,7 @@ set_property -dict [list \
     CONFIG.RESET_PORT {resetn} \
     CONFIG.RESET_TYPE {ACTIVE_LOW} \
     CONFIG.USE_LOCKED {false} \
-  CONFIG.USE_RESET {true} \
+    CONFIG.USE_RESET {true} \
 ] [get_bd_cells $ecs_clock_300_mhz]
 
 # Configure ECS 300MHz input board clock I/O
@@ -492,17 +440,14 @@ startgroup
     set_property name system_resetn [get_bd_ports resetn_0]
     set_property -dict [list \
     CONFIG.CLKIN1_JITTER_PS {33.330000000000005} \
-    CONFIG.CLKOUT1_JITTER {143.207} \
     CONFIG.MMCM_CLKIN1_PERIOD {3.333} \
-    CONFIG.MMCM_CLKIN2_PERIOD {10.0} \
-    CONFIG.MMCM_DIVCLK_DIVIDE {3} \
     CONFIG.PRIM_IN_FREQ {300.000} \
     CONFIG.USE_LOCKED {true} \
     ] [get_bd_cells $ecs_clock_300_mhz]
     make_bd_pins_external  [get_bd_pins $ecs_clock_300_mhz/locked]
-    set_property name sim_clock_100MHz_locked [get_bd_ports locked_0]
+    set_property name sim_clock_150MHz_locked [get_bd_ports locked_0]
     make_bd_pins_external  [get_bd_pins $ecs_clock_300_mhz/clk_out1]
-    set_property name sim_clock_100MHz [get_bd_ports clk_out1_0]
+    set_property name sim_clock_150MHz [get_bd_ports clk_out1_0]
 endgroup
 
 # Create reset and clocking
@@ -573,6 +518,56 @@ set_property -dict [list \
     CONFIG.ID {0} \
     CONFIG.DAC_DDS_TYPE {1} \
     CONFIG.DAC_DDS_CORDIC_DW {14} \
+] [get_bd_cells $axi_ad9361]
+
+# =========================================================================
+# SIMULATION-ONLY OVERRIDES — DO NOT USE IN PRODUCTION BUILDS
+# =========================================================================
+# The following parameters disable hardware features that do not simulate
+# correctly (or at all) in behavioral simulation with Xilinx Unisim models.
+# They match the settings used in ADI's own reference testbench
+# (deps/hdl/library/axi_ad9361/sim/xilinx/axi_ad9361_tb.v).
+#
+# For production (AU15P or any real FPGA target), these must remain at their
+# defaults:  TDD_DISABLE=0, IODELAY_CTRL=1, RX_NODPA=0,
+#            ADC_DCFILTER_DISABLE=0, ADC_IQCORRECTION_DISABLE=0,
+#            DAC_IQCORRECTION_DISABLE=0.
+#
+# TDD_DISABLE:              The TDD state machine gates the DAC data path.
+#                            Without TDD timing register configuration, TX
+#                            data is held at zero.  Disabling TDD allows
+#                            continuous FDD operation as intended by this
+#                            loopback test.
+#
+# IODELAY_CTRL:             Instantiates IDELAYCTRL/IDELAYE3 primitives
+#                            whose Unisim sim models require tap calibration
+#                            and a reset sequence that differs from hardware.
+#                            Disabling removes IDELAY from the RX capture
+#                            chain — safe because TB signals have zero skew.
+#
+# RX_NODPA:                 Dynamic Phase Alignment requires a training
+#                            sequence from a real AD9361 chip.  The loopback
+#                            TB cannot provide this.  Disabling uses a fixed
+#                            sampling phase, which is correct for ideal
+#                            simulation stimulus.
+#
+# ADC_DCFILTER_DISABLE:     DC offset filter adds pipeline latency and can
+#                            absorb legitimate DC content in loopback data.
+#                            Not needed when stimulus is known-clean.
+#
+# ADC_IQCORRECTION_DISABLE: IQ correction requires calibration coefficients.
+#                            Without them the path is identity, but adds
+#                            unnecessary pipeline stages.
+#
+# DAC_IQCORRECTION_DISABLE: Same rationale as ADC IQ correction.
+# =========================================================================
+set_property -dict [list \
+    CONFIG.TDD_DISABLE {1} \
+    CONFIG.IODELAY_CTRL {0} \
+    CONFIG.RX_NODPA {1} \
+    CONFIG.ADC_DCFILTER_DISABLE {1} \
+    CONFIG.ADC_IQCORRECTION_DISABLE {1} \
+    CONFIG.DAC_IQCORRECTION_DISABLE {1} \
 ] [get_bd_cells $axi_ad9361]
 
 # Create external ports for AD9361 LVDS interface
@@ -653,15 +648,14 @@ connect_bd_net [get_bd_pins $axi_ad9361/l_clk] [get_bd_pins $util_ad9361_lclk_re
 
 ###############################################################################
 # AXI AD9361 Adapter (HLS IP)
-# Replaces: util_ad9361_adc_fifo, util_ad9361_adc_pack,
-#           axi_ad9361_dac_fifo, util_ad9361_dac_upack
-# Provides: Internal TX/RX BRAMs, loopback capability, AXI-Lite control
+# Pure datapath: TX stream → BRAM → DAC, ADC → BRAM → RX stream (auto-drain)
+# No control/status buses — runs entirely on l_clk domain
 ###############################################################################
 
 puts "INFO: Instantiating AXI AD9361 Adapter..."
 
 # Create the HLS adapter IP
-create_bd_cell -type ip -vlnv user:hls:axi_ad9361_adapter:4.0 $axi_ad9361_adapter
+create_bd_cell -type ip -vlnv user:hls:axi_ad9361_adapter:5.0 $axi_ad9361_adapter
 
 # Connect adapter clock and reset (l_clk domain, 125 MHz)
 connect_bd_net [get_bd_pins $axi_ad9361/l_clk] [get_bd_pins $axi_ad9361_adapter/ap_clk]
@@ -721,27 +715,27 @@ connect_bd_net [get_bd_pins $axi_ad9361_adapter/dac_dunf] [get_bd_pins $axi_ad93
 
 ###############################################################################
 # AXI-Lite to Streaming Adapter (HLS IP)
-# Bridges CPU AXI-Lite to the AD9361 adapter's AXI-Stream and ap_none
-# control/status interfaces.  Runs in the 100 MHz AXI clock domain.
+# Pure AXI-Lite controlled bridge for 1024-sample TX/RX transfers.
+# Runs in the 150 MHz AXI clock domain.
 ###############################################################################
 
 puts "INFO: Instantiating AXI-Lite to Streaming Adapter..."
 
 create_bd_cell -type ip -vlnv user:hls:axi_lite_to_streaming_adapter:1.0 $axi_streaming_adapter
 
-# Connect adapter clock and reset (100 MHz AXI domain)
+# Connect adapter clock and reset (150 MHz AXI domain)
 connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1] [get_bd_pins $axi_streaming_adapter/ap_clk]
 connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins $axi_streaming_adapter/ap_rst_n]
 
-# Control/Status CDC handled by async FIFOs below (ctrl_stream, status_stream)
-
 ###############################################################################
-# AXI-Stream CDC FIFOs (100 MHz <-> 125 MHz l_clk)
+# AXI-Stream CDC FIFOs (150 MHz <-> 125 MHz l_clk)
+# TX: streaming adapter (150 MHz) -> ad9361_adapter (125 MHz l_clk)
+# RX: ad9361_adapter (125 MHz l_clk) -> streaming adapter (150 MHz)
 ###############################################################################
 
 puts "INFO: Instantiating AXI-Stream CDC FIFOs..."
 
-# TX CDC FIFO: axi_streaming_adapter (100 MHz) -> ad9361_adapter (125 MHz l_clk)
+# TX CDC FIFO: axi_streaming_adapter (150 MHz) -> ad9361_adapter (125 MHz l_clk)
 create_bd_cell -type ip -vlnv xilinx.com:ip:axis_data_fifo:2.0 $ad9361_cdc_tx_streaming_fifo
 set_property -dict [list CONFIG.HAS_TLAST.VALUE_SRC USER] [get_bd_cells $ad9361_cdc_tx_streaming_fifo]
 set_property -dict [list \
@@ -759,7 +753,7 @@ connect_bd_net [get_bd_pins $axi_ad9361/l_clk]                       [get_bd_pin
 connect_bd_intf_net [get_bd_intf_pins $axi_streaming_adapter/tx_stream]      [get_bd_intf_pins $ad9361_cdc_tx_streaming_fifo/S_AXIS]
 connect_bd_intf_net [get_bd_intf_pins $ad9361_cdc_tx_streaming_fifo/M_AXIS]  [get_bd_intf_pins $axi_ad9361_adapter/tx_stream]
 
-# RX CDC FIFO: ad9361_adapter (125 MHz l_clk) -> axi_streaming_adapter (100 MHz)
+# RX CDC FIFO: ad9361_adapter (125 MHz l_clk) -> axi_streaming_adapter (150 MHz)
 create_bd_cell -type ip -vlnv xilinx.com:ip:axis_data_fifo:2.0 $ad9361_cdc_rx_streaming_fifo
 set_property -dict [list CONFIG.HAS_TLAST.VALUE_SRC USER] [get_bd_cells $ad9361_cdc_rx_streaming_fifo]
 set_property -dict [list \
@@ -776,38 +770,6 @@ connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1]             [get_bd_pin
 # RX FIFO data path: ad9361_adapter -> FIFO -> streaming adapter
 connect_bd_intf_net [get_bd_intf_pins $axi_ad9361_adapter/rx_stream]          [get_bd_intf_pins $ad9361_cdc_rx_streaming_fifo/S_AXIS]
 connect_bd_intf_net [get_bd_intf_pins $ad9361_cdc_rx_streaming_fifo/M_AXIS]   [get_bd_intf_pins $axi_streaming_adapter/rx_stream]
-
-# Ctrl CDC FIFO: axi_streaming_adapter (100 MHz) -> ad9361_adapter (125 MHz l_clk)
-# 128-bit wide, depth-2 distributed RAM via open-logic olo_base_fifo_async
-create_bd_cell -type module -reference olo_base_fifo_async_wrapper $ad9361_cdc_ctrl_fifo
-
-connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1]                  [get_bd_pins $ad9361_cdc_ctrl_fifo/In_Clk]
-connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn]             [get_bd_pins $ad9361_cdc_ctrl_fifo/In_Rst_n]
-connect_bd_net [get_bd_pins $axi_ad9361/l_clk]                            [get_bd_pins $ad9361_cdc_ctrl_fifo/Out_Clk]
-connect_bd_net [get_bd_pins $util_ad9361_lclk_reset/peripheral_aresetn]    [get_bd_pins $ad9361_cdc_ctrl_fifo/Out_Rst_n]
-
-connect_bd_net [get_bd_pins $axi_streaming_adapter/ctrl_data_out]   [get_bd_pins $ad9361_cdc_ctrl_fifo/In_Data]
-connect_bd_net [get_bd_pins $axi_streaming_adapter/ctrl_valid_out]  [get_bd_pins $ad9361_cdc_ctrl_fifo/In_Valid]
-connect_bd_net [get_bd_pins $ad9361_cdc_ctrl_fifo/In_Ready]         [get_bd_pins $axi_streaming_adapter/ctrl_ready_in]
-connect_bd_net [get_bd_pins $ad9361_cdc_ctrl_fifo/Out_Data]         [get_bd_pins $axi_ad9361_adapter/ctrl_data_in]
-connect_bd_net [get_bd_pins $ad9361_cdc_ctrl_fifo/Out_Valid]        [get_bd_pins $axi_ad9361_adapter/ctrl_valid_in]
-connect_bd_net [get_bd_pins $axi_ad9361_adapter/ctrl_ready_out]     [get_bd_pins $ad9361_cdc_ctrl_fifo/Out_Ready]
-
-# Status CDC FIFO: ad9361_adapter (125 MHz l_clk) -> axi_streaming_adapter (100 MHz)
-# 128-bit wide, depth-2 distributed RAM via open-logic olo_base_fifo_async
-create_bd_cell -type module -reference olo_base_fifo_async_wrapper $ad9361_cdc_status_fifo
-
-connect_bd_net [get_bd_pins $axi_ad9361/l_clk]                              [get_bd_pins $ad9361_cdc_status_fifo/In_Clk]
-connect_bd_net [get_bd_pins $util_ad9361_lclk_reset/peripheral_aresetn]      [get_bd_pins $ad9361_cdc_status_fifo/In_Rst_n]
-connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1]                    [get_bd_pins $ad9361_cdc_status_fifo/Out_Clk]
-connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn]               [get_bd_pins $ad9361_cdc_status_fifo/Out_Rst_n]
-
-connect_bd_net [get_bd_pins $axi_ad9361_adapter/status_data_out]     [get_bd_pins $ad9361_cdc_status_fifo/In_Data]
-connect_bd_net [get_bd_pins $axi_ad9361_adapter/status_valid_out]    [get_bd_pins $ad9361_cdc_status_fifo/In_Valid]
-connect_bd_net [get_bd_pins $ad9361_cdc_status_fifo/In_Ready]        [get_bd_pins $axi_ad9361_adapter/status_ready_in]
-connect_bd_net [get_bd_pins $ad9361_cdc_status_fifo/Out_Data]        [get_bd_pins $axi_streaming_adapter/status_data_in]
-connect_bd_net [get_bd_pins $ad9361_cdc_status_fifo/Out_Valid]       [get_bd_pins $axi_streaming_adapter/status_valid_in]
-connect_bd_net [get_bd_pins $axi_streaming_adapter/status_ready_out] [get_bd_pins $ad9361_cdc_status_fifo/Out_Ready]
 
 ###############################################################################
 # AXI and Reset Connections
@@ -864,9 +826,9 @@ set_property range 16K [get_bd_addr_segs {NEORV32_RISC_V/m_axi/SEG_axi_streaming
 
 validate_bd_design
 save_bd_design
-set_property target_language VHDL [current_project]
+set_property target_language Verilog [current_project]
 make_wrapper -files [get_files $project_dir/$project_name.srcs/$synth_sources_name/bd/$top_level_bd_name/$top_level_bd_name.bd] -top
-add_files -norecurse $project_dir/$project_name.gen/$synth_sources_name/bd/$top_level_bd_name/hdl/${top_level_bd_name}_wrapper.vhd
+add_files -norecurse $project_dir/$project_name.gen/$synth_sources_name/bd/$top_level_bd_name/hdl/${top_level_bd_name}_wrapper.v
 add_files -fileset constrs_1 -norecurse $project_dir/NEORV32_Simulation.xdc
 save_bd_design
 

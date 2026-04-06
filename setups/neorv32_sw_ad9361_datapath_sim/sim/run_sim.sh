@@ -28,7 +28,7 @@ set -e
 # Configuration
 VSIM="${VSIM:-vsim}"
 SIM_MODE="gui"
-SIM_TIME="10ms"
+SIM_TIME="5ms"
 DETAILED="no"
 
 # Change to script directory
@@ -66,7 +66,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: ./run_sim.sh [options]"
             echo ""
             echo "Options:"
-            echo "  --time TIME    Set simulation time (default: 50ms)"
+            echo "  --time TIME    Set simulation time (default: 5ms)"
             echo "  --gui          Run in GUI mode (default)"
             echo "  --batch        Run in batch/command-line mode"
             echo "  --detailed     Full signal visibility (+acc=npr) with waveforms"
@@ -74,7 +74,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --help         Show this help message"
             echo ""
             echo "Examples:"
-            echo "  ./run_sim.sh                       Run fast (50ms, GUI, +acc=rn)"
+            echo "  ./run_sim.sh                       Run fast (5ms, GUI, +acc=rn)"
             echo "  ./run_sim.sh --detailed            Run with full waveforms"
             echo "  ./run_sim.sh --time 5ms --batch    Run 5ms in batch mode"
             exit 0
@@ -113,8 +113,9 @@ fi
 # uses the latest build.
 NEORV32_HOME="$(cd "../../.." && pwd)"
 IMEM_SRC="$NEORV32_HOME/rtl/core/neorv32_imem_image.vhd"
-IPSHARED_DIR="../NEORV32_Simulation.ip_user_files/bd/Top/ipshared/9d53/src/neorv32"
-IPSHARED_GEN="../NEORV32_Simulation.gen/sources_1/bd/Top/ipshared/9d53/src/neorv32"
+# Find ipshared directories dynamically (hash changes on each project rebuild)
+IPSHARED_DIR=$(find ../NEORV32_Simulation.ip_user_files/bd/Top/ipshared -name "neorv32_imem_image.vhd" -printf '%h\n' 2>/dev/null | head -1)
+IPSHARED_GEN=$(find ../NEORV32_Simulation.gen/sources_1/bd/Top/ipshared -name "neorv32_imem_image.vhd" -printf '%h\n' 2>/dev/null | head -1)
 
 if [ -f "$IMEM_SRC" ]; then
     echo "Syncing IMEM image from source..."

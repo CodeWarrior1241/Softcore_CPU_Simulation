@@ -17,7 +17,7 @@
 //  |           DUT (Top_wrapper / FPGA Design)                              |
 //  |                                                                        |
 //  |  300MHz ECS     +-------------+                                        |
-//  |  diff clk ----->| clk_wiz     |---> 100 MHz (AXI bus, CPU)            |
+//  |  diff clk ----->| clk_wiz     |---> 150 MHz (AXI bus, CPU)            |
 //  |                 +-------------+---> 300 MHz (IODELAY ref)              |
 //  |                                                                        |
 //  |  LVDS RX        +-------------+         +-------------+    LVDS TX     |
@@ -28,29 +28,30 @@
 //  |                  (125   |MHz)                   |            | data     |
 //  |                        v                       |                       |
 //  |                 +-------------------------------+------+               |
-//  |                 |      axi_ad9361_adapter (HLS, v4.0)  |               |
+//  |                 |      axi_ad9361_adapter (HLS, v5.0)  |               |
 //  |                 |      ap_clk = l_clk (125 MHz)        |               |
-//  |                 |      ctrl/status = ap_none wires     |               |
+//  |                 |      Pure datapath (no ctrl/status)   |               |
 //  |                 |      tx/rx_stream = AXI-Stream       |               |
 //  |                 +--------+-----------------------+-----+               |
 //  |                    tx_stream                rx_stream                   |
 //  |                        |                       ^                       |
 //  |                 +------v------+         +------+------+                |
 //  |                 | TX CDC FIFO |         | RX CDC FIFO |                |
-//  |                 | 100->125MHz |         | 125->100MHz |                |
+//  |                 | 150->125MHz |         | 125->150MHz |                |
 //  |                 +------+------+         +------+------+                |
 //  |                        ^                       |                       |
 //  |                 +------+-----------------------+------+                |
-//  |                 |  axi_streaming_adapter (HLS, v1.0)  |                |
-//  |                 |  ap_clk = 100 MHz (AXI)             |                |
+//  |                 |  axi_streaming_adapter (HLS, v3.0)  |                |
+//  |                 |  ap_clk = 150 MHz (AXI)             |                |
 //  |                 |  s_axi_ctrl = AXI-Lite (CPU)        |                |
+//  |                 |  State machine: IDLE→INIT→SEND→RX   |                |
 //  |                 |  tx_data[1024], rx_data[1024]        |                |
 //  |                 +-------------------------------------+                |
 //  |                        ^                                               |
-//  |                        | AXI-Lite (100 MHz)                            |
+//  |                        | AXI-Lite (150 MHz)                            |
 //  |  +-------------+------+                                                |
 //  |  | NEORV32 CPU |---> UART TX (status + verification)                   |
-//  |  | (100 MHz)   |---> GPIO (up_enable, up_txnrx)                        |
+//  |  | (150 MHz)   |---> GPIO (up_enable, up_txnrx)                        |
 //  |  +-------------+---> AXI (BRAM, axi_ad9361, streaming_adapter)         |
 //  |                                                                        |
 //  +------------------------------------------------------------------------+
@@ -61,22 +62,23 @@
 //
 // Testbench (runs independently):
 //  1. Reset held for 1ms (PLL lock and initialization)
-//  2. PLL locks, 100 MHz and 300 MHz clocks stable
+//  2. PLL locks, 150 MHz and 300 MHz clocks stable
 //  3. Testbench feeds COE data into LVDS RX at 125 MHz (looped)
 //  4. After 2 full COE loops (2048 samples), switches to TX->RX loopback
 //  5. Simulation runs for 50ms total
 //
 // CPU firmware (runs in parallel after reset):
-//  1. Boot, init UART, start streaming adapter bridge (ap_ctrl_chain)
-//  2. Configure adapter: all channels enabled, loopback on
-//  3. Enable AD9361 via GPIO (up_enable=1, up_txnrx=1)
-//  4. Write 1024 known samples to TX buffer, trigger TX burst
-//  5. Wait for RX_READY, read back 1024 samples, verify, release slot
-//  6. Repeat RX readback for 3 cycles, report PASS/FAIL via UART
+//  1. Boot, init UART, configure AD9361 core registers
+//  2. Enable AD9361 via GPIO (up_enable=1, up_txnrx=1)
+//  3. Write 1024 known samples to TX buffer, pulse enable
+//     (bridge: IDLE → INIT → SEND_AND_RECEIVE → RECEIVE)
+//  4. Poll rx_sample_count for 1024, read back RX samples, verify
+//  5. Pulse rx_read_done to release buffer, repeat for 3 cycles
+//  6. Report PASS/FAIL via GPIO and UART
 //
 // Datapath (hardware):
 //  COE/loopback -> LVDS RX -> axi_ad9361 ADC -> axi_ad9361_adapter (125 MHz)
-//  -> RX CDC FIFO -> streaming adapter rx_data[] (100 MHz, CPU reads)
+//  -> RX CDC FIFO -> streaming adapter rx_data[] (150 MHz, CPU reads)
 //  CPU writes tx_data[] -> streaming adapter -> TX CDC FIFO
 //  -> axi_ad9361_adapter -> axi_ad9361 DAC -> LVDS TX
 //
@@ -136,8 +138,8 @@ module vivado_tb;
     wire txnrx;
 
     // Clock locked indicator (directly from PLL via external port)
-    wire sim_clock_100MHz_locked;
-    wire sim_clock_100MHz;
+    wire sim_clock_150MHz_locked;
+    wire sim_clock_150MHz;
 
     //--------------------------------------------------------------------------
     // COE Data Storage and Stimulus Generation
@@ -168,9 +170,13 @@ module vivado_tb;
     // RX MUX: Select between stimulus and loopback
     //--------------------------------------------------------------------------
 
-    // Use stimulus clock initially, then switch to TX loopback
-    assign rx_clk_in_p   = loopback_mode ? tx_clk_out_p   : stim_clk;
-    assign rx_clk_in_n   = loopback_mode ? tx_clk_out_n   : ~stim_clk;
+    // RX clock always from the free-running stimulus clock (external SSI clock).
+    // Only frame and data are muxed for loopback.  Looping tx_clk_out back to
+    // rx_clk_in creates a closed-loop bootstrap (l_clk depends on rx_clk depends
+    // on tx_clk depends on l_clk) with no stable source — the ADI reference TB
+    // avoids this by always driving rx_clk externally.
+    assign rx_clk_in_p   = stim_clk;
+    assign rx_clk_in_n   = ~stim_clk;
     assign rx_frame_in_p = loopback_mode ? tx_frame_out_p : stim_frame_p;
     assign rx_frame_in_n = loopback_mode ? tx_frame_out_n : stim_frame_n;
     assign rx_data_in_p  = loopback_mode ? tx_data_out_p  : stim_data_p;
@@ -185,8 +191,8 @@ module vivado_tb;
         .ecs_clk_in_clk_p       (ecs_clk_in_p),
         .ecs_clk_in_clk_n       (ecs_clk_in_n),
         .system_resetn          (system_resetn),
-        .sim_clock_100MHz_locked(sim_clock_100MHz_locked),
-        .sim_clock_100MHz       (sim_clock_100MHz),
+        .sim_clock_150MHz_locked(sim_clock_150MHz_locked),
+        .sim_clock_150MHz       (sim_clock_150MHz),
 
         // UART
         .uart0_txd              (uart0_txd),
@@ -261,6 +267,22 @@ module vivado_tb;
     end
 
     //--------------------------------------------------------------------------
+    // DAC Sync Enable Force
+    //--------------------------------------------------------------------------
+    // In TX-to-RX loopback, the DAC needs dac_sync_enable=1 to start
+    // outputting data.  Normally this is driven by adc_valid, but in loopback
+    // the ADC can't produce valid data until the DAC is already driving the
+    // LVDS lines — creating a deadlock.  The ADI reference TB breaks this
+    // with a force (see axi_ad9361_tb.v line 587).
+
+    initial begin
+        wait(system_resetn && sim_clock_150MHz_locked);
+        #100;
+        force dut.Top_i.axi_ad9361.inst.dac_sync_enable = 1'b1;
+        $display("[%0t] Forced dac_sync_enable=1 for loopback mode", $time);
+    end
+
+    //--------------------------------------------------------------------------
     // UART Initialization
     //--------------------------------------------------------------------------
 
@@ -300,12 +322,12 @@ module vivado_tb;
     // Generate stimulus clock and data from COE file
     always begin
         // Wait for reset release and PLL lock
-        wait(system_resetn && sim_clock_100MHz_locked);
+        wait(system_resetn && sim_clock_150MHz_locked);
 
         // Small delay after reset
         #1000;
 
-        $display("[%0t] Starting COE data stimulus", $time);
+        // COE stimulus begins
 
         // Loop through COE data continuously
         forever begin
@@ -348,7 +370,7 @@ module vivado_tb;
             coe_index = coe_index + 1;
             if (coe_index >= NUM_COE_SAMPLES) begin
                 coe_index = 0;  // Loop back to start
-                $display("[%0t] COE data loop completed (%0d samples sent), restarting", $time, samples_sent);
+                // COE data wraps — silent, continuous
             end
 
             // After sending initial data, enable loopback mode
@@ -362,126 +384,18 @@ module vivado_tb;
     end
 
     //--------------------------------------------------------------------------
-    // Hardware Milestone Monitors
-    // These fire on signal edges and print immediately — no UART delay.
+    // Status Monitors
     //--------------------------------------------------------------------------
 
     // PLL lock
     reg pll_locked_prev;
-    always @(posedge sim_clock_100MHz) begin
-        pll_locked_prev <= sim_clock_100MHz_locked;
-        if (sim_clock_100MHz_locked && !pll_locked_prev)
-            $display("[%0t] MILESTONE: PLL locked", $time);
+    always @(posedge sim_clock_150MHz) begin
+        pll_locked_prev <= sim_clock_150MHz_locked;
+        if (sim_clock_150MHz_locked && !pll_locked_prev)
+            $display("[%0t] PLL locked", $time);
     end
 
-    // AD9361 enable/txnrx (GPIO-driven)
-    reg enable_prev, txnrx_prev;
-    always @(posedge sim_clock_100MHz) begin
-        enable_prev <= enable;
-        txnrx_prev  <= txnrx;
-        if (enable && !enable_prev)
-            $display("[%0t] MILESTONE: AD9361 enable asserted", $time);
-        if (txnrx && !txnrx_prev)
-            $display("[%0t] MILESTONE: AD9361 txnrx asserted", $time);
-    end
-
-    // First ADC valid from axi_ad9361 (sampled on l_clk, gated on GPIO[2] = AD9361 configured)
-    reg first_adc_valid_seen;
-    initial first_adc_valid_seen = 0;
-    always @(posedge dut.Top_i.axi_ad9361.l_clk) begin
-        if (!first_adc_valid_seen && dut.Top_i.NEORV32_RISC_V.gpio_o[2]) begin
-            if (dut.Top_i.axi_ad9361_adapter.adc_valid_i0) begin
-                first_adc_valid_seen <= 1;
-                $display("[%0t] MILESTONE: First ADC valid detected at adapter (post-config)", $time);
-            end
-        end
-    end
-
-    // Ctrl CDC FIFO activity
-    reg first_ctrl_out_valid_seen;
-    initial first_ctrl_out_valid_seen = 0;
-    always @(posedge sim_clock_100MHz) begin
-        if (!first_ctrl_out_valid_seen) begin
-            if (dut.Top_i.ad9361_cdc_ctrl_fifo.Out_Valid) begin
-                first_ctrl_out_valid_seen <= 1;
-                $display("[%0t] MILESTONE: First ctrl word delivered to adapter (FIFO Out_Valid)", $time);
-            end
-        end
-    end
-
-    // Status CDC FIFO activity
-    reg first_status_out_valid_seen;
-    initial first_status_out_valid_seen = 0;
-    always @(posedge sim_clock_100MHz) begin
-        if (!first_status_out_valid_seen) begin
-            if (dut.Top_i.ad9361_cdc_status_fifo.Out_Valid) begin
-                first_status_out_valid_seen <= 1;
-                $display("[%0t] MILESTONE: First status word delivered to bridge (FIFO Out_Valid)", $time);
-            end
-        end
-    end
-
-    // TX stream: bridge side (into CDC FIFO)
-    reg first_tx_bridge_seen;
-    initial first_tx_bridge_seen = 0;
-    always @(posedge sim_clock_100MHz) begin
-        if (!first_tx_bridge_seen) begin
-            if (dut.Top_i.ad9361_cdc_tx_streaming_fifo.s_axis_tvalid) begin
-                first_tx_bridge_seen <= 1;
-                $display("[%0t] MILESTONE: First TX TVALID at CDC FIFO input (bridge side)", $time);
-            end
-        end
-    end
-
-    // TX stream: adapter side (out of CDC FIFO)
-    reg first_tx_stream_seen;
-    initial first_tx_stream_seen = 0;
-    always @(posedge sim_clock_100MHz) begin
-        if (!first_tx_stream_seen) begin
-            if (dut.Top_i.axi_ad9361_adapter.tx_stream_TVALID) begin
-                first_tx_stream_seen <= 1;
-                $display("[%0t] MILESTONE: First TX TVALID at adapter (CDC FIFO output)", $time);
-            end
-        end
-    end
-
-    // RX stream: adapter side (into CDC FIFO)
-    reg first_rx_adapter_seen;
-    initial first_rx_adapter_seen = 0;
-    always @(posedge sim_clock_100MHz) begin
-        if (!first_rx_adapter_seen) begin
-            if (dut.Top_i.axi_ad9361_adapter.rx_stream_TVALID) begin
-                first_rx_adapter_seen <= 1;
-                $display("[%0t] MILESTONE: First RX TVALID at adapter (into CDC FIFO)", $time);
-            end
-        end
-    end
-
-    // RX stream: bridge side (out of CDC FIFO)
-    reg first_rx_bridge_seen;
-    initial first_rx_bridge_seen = 0;
-    always @(posedge sim_clock_100MHz) begin
-        if (!first_rx_bridge_seen) begin
-            if (dut.Top_i.ad9361_cdc_rx_streaming_fifo.m_axis_tvalid) begin
-                first_rx_bridge_seen <= 1;
-                $display("[%0t] MILESTONE: First RX TVALID at bridge (CDC FIFO output)", $time);
-            end
-        end
-    end
-
-    // Adapter ctrl_valid_in — is the adapter actually receiving control words?
-    reg first_adapter_ctrl_seen;
-    initial first_adapter_ctrl_seen = 0;
-    always @(posedge sim_clock_100MHz) begin
-        if (!first_adapter_ctrl_seen) begin
-            if (dut.Top_i.axi_ad9361_adapter.ctrl_valid_in) begin
-                first_adapter_ctrl_seen <= 1;
-                $display("[%0t] MILESTONE: First ctrl_valid_in at adapter (ctrl accepted)", $time);
-            end
-        end
-    end
-
-    // l_clk activity check (gated on reset released to avoid pre-reset transients)
+    // l_clk recovery
     reg first_lclk_seen;
     integer lclk_edge_count;
     initial begin first_lclk_seen = 0; lclk_edge_count = 0; end
@@ -490,31 +404,19 @@ module vivado_tb;
             lclk_edge_count <= lclk_edge_count + 1;
             if (!first_lclk_seen) begin
                 first_lclk_seen <= 1;
-                $display("[%0t] MILESTONE: First l_clk edge detected (post-reset)", $time);
+                $display("[%0t] l_clk recovered (125 MHz)", $time);
             end
         end
     end
 
-    // l_clk death detector — if no edge for 1us, report it
+    // l_clk death detector
     reg [31:0] lclk_last_count;
     initial lclk_last_count = 0;
     always begin
-        #1_000_000; // check every 1ms
+        #1_000_000;
         if (lclk_edge_count == lclk_last_count && first_lclk_seen)
-            $display("[%0t] WARNING: l_clk appears stopped (no edges in last 1ms, count=%0d)", $time, lclk_edge_count);
+            $display("[%0t] WARNING: l_clk stopped (no edges in last 1ms)", $time);
         lclk_last_count = lclk_edge_count;
-    end
-
-    // TX CDC FIFO m_axis_tready — is the adapter accepting data?
-    reg first_tx_fifo_ready_seen;
-    initial first_tx_fifo_ready_seen = 0;
-    always @(posedge sim_clock_100MHz) begin
-        if (!first_tx_fifo_ready_seen) begin
-            if (dut.Top_i.ad9361_cdc_tx_streaming_fifo.m_axis_tready) begin
-                first_tx_fifo_ready_seen <= 1;
-                $display("[%0t] MILESTONE: TX CDC FIFO m_axis_tready asserted (adapter accepting)", $time);
-            end
-        end
     end
 
     //--------------------------------------------------------------------------
@@ -525,7 +427,7 @@ module vivado_tb;
     // and calls $finish immediately — no waiting for timeout.
 
     reg result_valid_prev;
-    always @(posedge sim_clock_100MHz) begin
+    always @(posedge sim_clock_150MHz) begin
         result_valid_prev <= dut.Top_i.NEORV32_RISC_V.gpio_o[6];
         if (dut.Top_i.NEORV32_RISC_V.gpio_o[6] && !result_valid_prev) begin
             if (dut.Top_i.NEORV32_RISC_V.gpio_o[5]) begin
@@ -541,7 +443,7 @@ module vivado_tb;
 
     // GPIO milestone monitors
     reg [7:0] gpio_prev;
-    always @(posedge sim_clock_100MHz) begin
+    always @(posedge sim_clock_150MHz) begin
         gpio_prev <= dut.Top_i.NEORV32_RISC_V.gpio_o[7:0];
         if (dut.Top_i.NEORV32_RISC_V.gpio_o[2] && !gpio_prev[2])
             $display("[%0t] MILESTONE: AD9361 core configured (GPIO[2])", $time);
@@ -552,21 +454,10 @@ module vivado_tb;
     end
 
     //--------------------------------------------------------------------------
-    // TX Data Monitoring
-    //--------------------------------------------------------------------------
-
-    always @(posedge tx_clk_out_p) begin
-        if (system_resetn && sim_clock_100MHz_locked) begin
-            // Monitor TX data (uncomment for debug)
-            // $display("[%0t] TX Data: %h, Frame: %b", $time, tx_data_out_p, tx_frame_out_p);
-        end
-    end
-
-    //--------------------------------------------------------------------------
     // UART TX Monitoring (simple character capture)
     //--------------------------------------------------------------------------
 
-    // UART parameters (115200 baud at 100MHz clock)
+    // UART parameters (115200 baud at 150MHz clock)
     parameter UART_BIT_PERIOD_NS = 8680;  // 1/115200 = 8.68us
 
     reg [7:0] uart_rx_byte;
@@ -627,13 +518,13 @@ module vivado_tb;
         $display("==============================================");
 
         // Wait for simulation to complete or timeout
-        // Normal completion via GPIO auto-terminate (~2ms post-reset).
+        // Normal completion via GPIO auto-terminate (~2.8ms post-reset).
         // This timeout is a safety net only.
-        #10_000_000;  // 10ms timeout
+        #5_000_000;  // 5ms timeout
 
         $display("");
         $display("==============================================");
-        $display("  Simulation timeout reached (10ms)");
+        $display("  Simulation timeout reached (5ms)");
         $display("  Total samples sent: %0d", samples_sent);
         $display("  WARNING: CPU did not signal PASS/FAIL via GPIO");
         $display("==============================================");
