@@ -430,27 +430,19 @@ int main(void)
 	/* 7. Start streaming adapter bridge and configure datapath */
 	neorv32_uart0_puts("[ad9361_no-os] Configuring streaming adapter bridge...\n");
 
-	/* Start ap_ctrl_chain (must be called once before any register access) */
-	bridge_start();
+	/* Reset bridge to IDLE state (no-op if already IDLE) */
+	bridge_reset();
 
-	/* Soft-reset adapter (clears pointers, sticky flags) */
-	BRIDGE_REG(BRIDGE_REG_CTRL) = BRIDGE_CTRL_SOFT_RESET;
-
-	/* Enable TX channel 0 (I0/Q0) and RX channel 0 (I0/Q0) */
-	BRIDGE_REG(BRIDGE_REG_TX_CTRL) = BRIDGE_CH_EN_CH0;
-	BRIDGE_REG(BRIDGE_REG_RX_CTRL) = BRIDGE_CH_EN_CH0;
-
-	/* Enable adapter: global + TX + RX */
-	BRIDGE_REG(BRIDGE_REG_CTRL) = BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_TX_ENABLE | BRIDGE_CTRL_RX_ENABLE;
-
-	/* Load 1024 QPSK IQ samples into TX buffer and trigger burst */
+	/* Load 1024 QPSK IQ samples into TX buffer */
 	bridge_load_tx_data(qpsk_tx_samples, QPSK_TX_NUM_SAMPLES);
-	if (!bridge_trigger_tx(QPSK_TX_NUM_SAMPLES)) {
-		neorv32_uart0_puts("[ad9361_no-os] TX burst trigger TIMEOUT\n");
+
+	/* Enable bridge: IDLE -> INIT -> SEND_AND_RECEIVE -> RECEIVE */
+	if (!bridge_enable()) {
+		neorv32_uart0_puts("[ad9361_no-os] Bridge enable TIMEOUT\n");
 	}
-	neorv32_uart0_printf("[ad9361_no-os] TX loaded and triggered: %u samples\n",
+	neorv32_uart0_printf("[ad9361_no-os] TX burst sent: %u samples\n",
 			     (unsigned)QPSK_TX_NUM_SAMPLES);
-	neorv32_uart0_puts("[ad9361_no-os] Adapter enabled (TX + RX)\n");
+	neorv32_uart0_puts("[ad9361_no-os] Bridge running (TX complete, RX capturing)\n");
 
 	/* 8. Assert up_enable and up_txnrx (data path enable) */
 	neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 1);
@@ -486,51 +478,28 @@ int main(void)
 			neorv32_uart0_puts(RESP_RF_DISABLED);
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_ENABLE_SNAPSHOT)) {
-			/* Clear RX buffer */
-			BRIDGE_REG(BRIDGE_REG_CTRL) =
-				BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_TX_ENABLE | BRIDGE_CTRL_RX_ENABLE | BRIDGE_CTRL_RX_CLEAR;
-			/* Remove RX_CLEAR, let BRAM fill with ADC samples */
-			BRIDGE_REG(BRIDGE_REG_CTRL) =
-				BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_TX_ENABLE | BRIDGE_CTRL_RX_ENABLE;
-			/* Poll rx_fill until BRAM is full (1024 samples) */
-			int snapshot_ready = 0;
-			for (int i = 0; i < BRIDGE_POLL_TIMEOUT; i++) {
-				if (BRIDGE_REG(BRIDGE_REG_RX_FILL) >= BRIDGE_SAMPLE_DEPTH) {
-					snapshot_ready = 1;
-					break;
-				}
-			}
-			if (!snapshot_ready) {
+			/* Wait for RX buffer to fill (1024 samples from ADC auto-drain) */
+			if (!bridge_wait_rx_full()) {
 				neorv32_uart0_puts("snapshot_timeout\n");
 			} else {
-				/* Assert RX_DRAIN to push full BRAM through CDC FIFO */
-				BRIDGE_REG(BRIDGE_REG_CTRL) =
-					BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_TX_ENABLE | BRIDGE_CTRL_RX_ENABLE | BRIDGE_CTRL_RX_DRAIN;
-				/* Wait for bridge to receive complete burst */
-				if (!bridge_wait_rx_ready()) {
-					neorv32_uart0_puts("snapshot_timeout\n");
-				} else {
-					/* Clear RX_DRAIN before reading */
-					BRIDGE_REG(BRIDGE_REG_CTRL) =
-						BRIDGE_CTRL_ENABLE | BRIDGE_CTRL_TX_ENABLE | BRIDGE_CTRL_RX_ENABLE;
-					neorv32_uart0_puts(RESP_SNAPSHOT);
-					send_rx_snapshot();
-					bridge_release_rx();
-				}
+				neorv32_uart0_puts(RESP_SNAPSHOT);
+				send_rx_snapshot();
+				/* Release RX buffer so adapter can capture next burst */
+				bridge_release_rx();
 			}
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_GET_STATUS)) {
 			ad9361_get_en_state_machine_mode(phy, &ensm_mode);
-			uint32_t adapter_status = BRIDGE_REG(BRIDGE_REG_STATUS);
-			uint32_t rx_fill = BRIDGE_REG(BRIDGE_REG_RX_FILL);
-			uint32_t bridge_status = BRIDGE_REG(BRIDGE_REG_BRIDGE_STATUS);
+			uint32_t bridge_state = BRIDGE_REG(BRIDGE_REG_STATUS_STATE);
+			uint32_t tx_count = BRIDGE_REG(BRIDGE_REG_STATUS_TX_COUNT);
+			uint32_t rx_count = BRIDGE_REG(BRIDGE_REG_STATUS_RX_COUNT);
 			uint32_t gpio_status = neorv32_gpio_port_get() & 0xFF;
-			neorv32_uart0_printf("ENSM:%s RF:%s ADAPTER:0x%02x RX_FILL:%u BRIDGE:0x%02x GPIO:0x%02x\n",
+			neorv32_uart0_printf("ENSM:%s RF:%s STATE:%u TX_CNT:%u RX_CNT:%u GPIO:0x%02x\n",
 					     (ensm_mode < 8) ? ensm_mode_str[ensm_mode] : "?",
 					     rf_enabled ? "ON" : "OFF",
-					     (unsigned)adapter_status,
-					     (unsigned)rx_fill,
-					     (unsigned)bridge_status,
+					     (unsigned)bridge_state,
+					     (unsigned)tx_count,
+					     (unsigned)rx_count,
 					     (unsigned)gpio_status);
 		}
 		/* Unknown commands silently ignored */

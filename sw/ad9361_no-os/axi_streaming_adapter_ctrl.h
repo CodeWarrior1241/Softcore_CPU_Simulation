@@ -1,12 +1,16 @@
 /*
  * axi_streaming_adapter_ctrl.h - Register-level control for the
- * axi_lite_to_streaming_adapter HLS IP (v1.0)
+ * axi_lite_to_streaming_adapter HLS IP (v3.0)
  *
  * Bare-metal register access via volatile pointers.
  * Register offsets from HLS-generated xaxi_lite_to_streaming_adapter_hw.h.
  *
- * The bridge uses ap_ctrl_chain: software must write AP_START + AUTO_RESTART
- * once at init to start continuous operation.
+ * v3.0 uses ap_ctrl_none: no AP handshake needed, the IP runs continuously.
+ * Control/status is via struct-based AXI-Lite registers.
+ *
+ * State machine:
+ *   IDLE -> INIT_QPSK_DATA -> SEND_AND_RECEIVE_QPSK_DATA -> RECEIVE_QPSK_DATA
+ *   Reset returns from RECEIVE_QPSK_DATA -> IDLE.
  */
 
 #ifndef AXI_STREAMING_ADAPTER_CTRL_H
@@ -20,84 +24,32 @@
 /* ---------- Helper macros ---------- */
 #define BRIDGE_REG(off)  (*(volatile uint32_t *)(AXI_STREAMING_ADAPTER_BASE + (off)))
 
-/* ---------- AP control (ap_ctrl_chain handshake) ---------- */
-#define BRIDGE_REG_AP_CTRL            0x0000
-#define BRIDGE_AP_START               (1U << 0)
-#define BRIDGE_AP_DONE                (1U << 1)
-#define BRIDGE_AP_IDLE                (1U << 2)
-#define BRIDGE_AP_READY               (1U << 3)
-#define BRIDGE_AP_AUTO_RESTART        (1U << 7)
+/* ---------- Control registers (R/W, ctrl_regs_t struct) ---------- */
+#define BRIDGE_REG_CTRL_ENABLE        0x0010  /* Write non-zero to transition IDLE -> INIT */
+#define BRIDGE_REG_CTRL_RX_READ_DONE  0x0014  /* Write non-zero to release RX buffer */
+#define BRIDGE_REG_CTRL_RESET         0x0018  /* Write non-zero to return to IDLE */
 
-/* ---------- Control registers (R/W, passed through to adapter) ---------- */
-#define BRIDGE_REG_CTRL               0x0010
-#define BRIDGE_REG_RX_CTRL            0x0018
-#define BRIDGE_REG_TX_CTRL            0x0020
-#define BRIDGE_REG_LOOPBACK           0x0028
-#define BRIDGE_REG_SCRATCH            0x0030
-
-/* ---------- Status registers (read-only, from adapter) ---------- */
-#define BRIDGE_REG_STATUS             0x0038
-#define BRIDGE_REG_RX_STATUS          0x0048
-#define BRIDGE_REG_RX_FILL            0x0058
-#define BRIDGE_REG_TX_STATUS          0x0068
-
-/* ---------- Bridge internal registers ---------- */
-#define BRIDGE_REG_TX_COUNT_I         0x0078  /* Write: set to 1024 to trigger TX burst */
-#define BRIDGE_REG_TX_COUNT_O         0x0080  /* Read: current TX counter (0 when idle) */
-#define BRIDGE_REG_RX_READ_CNT_I      0x0088  /* Write: set to 1024 to free RX slot */
-#define BRIDGE_REG_RX_READ_CNT_O      0x0090  /* Read: current RX read counter */
-#define BRIDGE_REG_BRIDGE_STATUS      0x0098  /* Read: bridge state bits */
+/* ---------- Status registers (read-only, status_regs_t struct) ---------- */
+#define BRIDGE_REG_STATUS_STATE       0x0020  /* Current state_t value */
+#define BRIDGE_REG_STATUS_TX_COUNT    0x0024  /* TX samples sent so far */
+#define BRIDGE_REG_STATUS_RX_COUNT    0x0028  /* RX samples captured so far */
+#define BRIDGE_REG_STATUS_VLD         0x002C  /* Status valid (bit 0, COR) */
 
 /* ---------- Data memory arrays ---------- */
 #define BRIDGE_TX_DATA_BASE           0x1000  /* TX sample buffer (1024 x 32-bit) */
 #define BRIDGE_RX_DATA_BASE           0x2000  /* RX sample buffer (1024 x 32-bit) */
 #define BRIDGE_SAMPLE_DEPTH           1024
 
-/* ---------- CTRL register bit positions ---------- */
-#define BRIDGE_CTRL_ENABLE            (1U << 0)
-#define BRIDGE_CTRL_SOFT_RESET        (1U << 1)
-#define BRIDGE_CTRL_RX_ENABLE         (1U << 2)
-#define BRIDGE_CTRL_TX_ENABLE         (1U << 3)
-#define BRIDGE_CTRL_RX_CLEAR          (1U << 8)
-#define BRIDGE_CTRL_RX_DRAIN          (1U << 9)
-
-/* ---------- Channel enable masks (RX_CTRL / TX_CTRL) ---------- */
-#define BRIDGE_CH_EN_I0               (1U << 0)
-#define BRIDGE_CH_EN_Q0               (1U << 1)
-#define BRIDGE_CH_EN_I1               (1U << 2)
-#define BRIDGE_CH_EN_Q1               (1U << 3)
-#define BRIDGE_CH_EN_ALL              (BRIDGE_CH_EN_I0 | BRIDGE_CH_EN_Q0 | BRIDGE_CH_EN_I1 | BRIDGE_CH_EN_Q1)
-#define BRIDGE_CH_EN_CH0              (BRIDGE_CH_EN_I0 | BRIDGE_CH_EN_Q0)
-#define BRIDGE_CH_CLR_OVF             (1U << 8)
-#define BRIDGE_CH_CLR_UNF             (1U << 8)
-
-/* ---------- Bridge status bit positions ---------- */
-#define BRIDGE_STATUS_TX_SENDING      (1U << 0)
-#define BRIDGE_STATUS_RX_READY        (1U << 1)
-#define BRIDGE_STATUS_RX_READING      (1U << 2)
-
-/* ---------- Adapter status bit positions (from status_out) ---------- */
-#define ADAPTER_STATUS_ENABLED        (1U << 0)
-#define ADAPTER_STATUS_RX_ACTIVE      (1U << 1)
-#define ADAPTER_STATUS_TX_ACTIVE      (1U << 2)
-#define ADAPTER_STATUS_LOOPBACK       (1U << 3)
-#define ADAPTER_STATUS_RX_FULL        (1U << 4)
-#define ADAPTER_STATUS_TX_LOADED      (1U << 5)
-
-/* ---------- RX_STATUS bits ---------- */
-#define ADAPTER_RX_STATUS_OVERFLOW    (1U << 0)
-#define ADAPTER_RX_STATUS_VALID       (1U << 1)
+/* ---------- State enumeration (status.state values) ---------- */
+#define BRIDGE_STATE_IDLE                      0
+#define BRIDGE_STATE_INIT_QPSK_DATA            1
+#define BRIDGE_STATE_SEND_AND_RECEIVE_QPSK_DATA 2
+#define BRIDGE_STATE_RECEIVE_QPSK_DATA         3
 
 /* ---------- Polling timeout ---------- */
 #define BRIDGE_POLL_TIMEOUT           500000
 
 /* ---------- Inline helpers ---------- */
-
-/* Start the bridge (ap_ctrl_chain): call once at init. */
-static inline void bridge_start(void)
-{
-    BRIDGE_REG(BRIDGE_REG_AP_CTRL) = BRIDGE_AP_START | BRIDGE_AP_AUTO_RESTART;
-}
 
 /* Load TX sample buffer from a uint32_t array. */
 static inline void bridge_load_tx_data(const uint32_t *data, uint32_t num_samples)
@@ -108,27 +60,6 @@ static inline void bridge_load_tx_data(const uint32_t *data, uint32_t num_sample
     }
 }
 
-/* Trigger TX burst after loading samples. Returns 1 on success, 0 on timeout. */
-static inline int bridge_trigger_tx(uint32_t num_samples)
-{
-    BRIDGE_REG(BRIDGE_REG_TX_COUNT_I) = num_samples;
-    for (int i = 0; i < BRIDGE_POLL_TIMEOUT; i++) {
-        if (BRIDGE_REG(BRIDGE_REG_TX_COUNT_O) == 0)
-            return 1;
-    }
-    return 0;
-}
-
-/* Wait for RX data to be ready. Returns 1 on success, 0 on timeout. */
-static inline int bridge_wait_rx_ready(void)
-{
-    for (int i = 0; i < BRIDGE_POLL_TIMEOUT; i++) {
-        if (BRIDGE_REG(BRIDGE_REG_BRIDGE_STATUS) & BRIDGE_STATUS_RX_READY)
-            return 1;
-    }
-    return 0;
-}
-
 /* Read one word from RX sample buffer. */
 static inline uint32_t bridge_read_rx_sample(uint32_t index)
 {
@@ -136,10 +67,72 @@ static inline uint32_t bridge_read_rx_sample(uint32_t index)
     return bram[index];
 }
 
-/* Signal that all RX samples have been read, freeing the slot. */
+/*
+ * Reset the bridge state machine back to IDLE.
+ * Only effective from RECEIVE_QPSK_DATA state.
+ */
+static inline void bridge_reset(void)
+{
+    BRIDGE_REG(BRIDGE_REG_CTRL_RESET) = 1;
+    /* Wait for state to return to IDLE */
+    for (int i = 0; i < BRIDGE_POLL_TIMEOUT; i++) {
+        if (BRIDGE_REG(BRIDGE_REG_STATUS_STATE) == BRIDGE_STATE_IDLE) {
+            BRIDGE_REG(BRIDGE_REG_CTRL_RESET) = 0;
+            return;
+        }
+    }
+    BRIDGE_REG(BRIDGE_REG_CTRL_RESET) = 0;
+}
+
+/*
+ * Enable the bridge: transitions IDLE -> INIT -> SEND_AND_RECEIVE -> RECEIVE.
+ * TX data must be loaded into tx_data[] before calling this.
+ * Returns 1 if TX burst completes (state reaches RECEIVE), 0 on timeout.
+ */
+static inline int bridge_enable(void)
+{
+    BRIDGE_REG(BRIDGE_REG_CTRL_ENABLE) = 1;
+    /* Wait for transition out of IDLE */
+    for (int i = 0; i < BRIDGE_POLL_TIMEOUT; i++) {
+        if (BRIDGE_REG(BRIDGE_REG_STATUS_STATE) != BRIDGE_STATE_IDLE)
+            break;
+    }
+    BRIDGE_REG(BRIDGE_REG_CTRL_ENABLE) = 0;
+
+    /* Wait for TX burst to complete (state reaches RECEIVE_QPSK_DATA) */
+    for (int i = 0; i < BRIDGE_POLL_TIMEOUT; i++) {
+        if (BRIDGE_REG(BRIDGE_REG_STATUS_STATE) == BRIDGE_STATE_RECEIVE_QPSK_DATA)
+            return 1;
+    }
+    return 0;
+}
+
+/*
+ * Wait for RX buffer to fill (1024 samples captured).
+ * Returns 1 on success, 0 on timeout.
+ */
+static inline int bridge_wait_rx_full(void)
+{
+    for (int i = 0; i < BRIDGE_POLL_TIMEOUT; i++) {
+        if (BRIDGE_REG(BRIDGE_REG_STATUS_RX_COUNT) >= BRIDGE_SAMPLE_DEPTH)
+            return 1;
+    }
+    return 0;
+}
+
+/*
+ * Signal that software has finished reading the RX buffer.
+ * This releases the buffer so the adapter can capture the next 1024 samples.
+ */
 static inline void bridge_release_rx(void)
 {
-    BRIDGE_REG(BRIDGE_REG_RX_READ_CNT_I) = BRIDGE_SAMPLE_DEPTH;
+    BRIDGE_REG(BRIDGE_REG_CTRL_RX_READ_DONE) = 1;
+    /* Brief pulse — wait for rx_count to reset */
+    for (int i = 0; i < BRIDGE_POLL_TIMEOUT; i++) {
+        if (BRIDGE_REG(BRIDGE_REG_STATUS_RX_COUNT) < BRIDGE_SAMPLE_DEPTH)
+            break;
+    }
+    BRIDGE_REG(BRIDGE_REG_CTRL_RX_READ_DONE) = 0;
 }
 
 #endif /* AXI_STREAMING_ADAPTER_CTRL_H */
