@@ -10,7 +10,7 @@ set -e
 # Configuration
 VSIM="${VSIM:-vsim}"
 SIM_MODE="gui"
-SIM_TIME="150ms"
+SIM_TIME="500ms"
 
 # Change to script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,14 +45,14 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: ./run_sim.sh [options]"
             echo ""
             echo "Options:"
-            echo "  --time TIME    Set simulation time (default: 150ms)"
+            echo "  --time TIME    Set simulation time (default: 500ms)"
             echo "  --gui          Run in GUI mode (default)"
             echo "  --batch        Run in batch/command-line mode"
             echo "  --clean        Remove work directory and generated files"
             echo "  --help         Show this help message"
             echo ""
             echo "Examples:"
-            echo "  ./run_sim.sh                    Run with defaults (150ms, GUI)"
+            echo "  ./run_sim.sh                    Run with defaults (500ms, GUI)"
             echo "  ./run_sim.sh --time 50ms        Run for 50ms"
             echo "  ./run_sim.sh --batch            Run in batch mode"
             echo "  ./run_sim.sh --time 20ms --batch"

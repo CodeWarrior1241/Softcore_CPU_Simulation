@@ -94,13 +94,13 @@ make clean_all exe
 make install
 ```
 
-This compiles the application and installs `neorv32_application_image.vhd` to `rtl/core/`.
+This compiles the application and installs `neorv32_imem_image.vhd` to `rtl/core/`.
 
 See `sw/snapshot_handler/README.md` for detailed documentation on the application.
 
 ## Changing the Application Program
 
-The simulation runs whatever program is compiled into `rtl/core/neorv32_application_image.vhd`. To simulate a different program:
+The simulation runs whatever program is compiled into `rtl/core/neorv32_imem_image.vhd`. To simulate a different program:
 
 ### Step 1: Build the Program
 
@@ -112,7 +112,7 @@ make clean_all exe
 make install
 ```
 
-This generates and installs `neorv32_application_image.vhd` to `rtl/core/`.
+This generates and installs `neorv32_imem_image.vhd` to `rtl/core/`.
 
 ### Step 2: Clean and Re-run Simulation
 

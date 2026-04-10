@@ -14,7 +14,7 @@ do compile.do
 
 # Default simulation time (can be overridden)
 if {![info exists SIM_TIME]} {
-    set SIM_TIME "150ms"
+    set SIM_TIME "500ms"
 }
 
 puts "=========================================="
@@ -31,6 +31,13 @@ vsim -t 1ns -voptargs="+acc" \
     -L neorv32 \
     -L work \
     work.neorv32_tb
+
+# Suppress NUMERIC_STD metavalue warnings during CPU startup transient
+# (PMP comparisons against uninitialized address bus during the first
+#  few microseconds before LSU drives real values; harmless and floods
+#  the GUI transcript, slowing simulation by orders of magnitude)
+set NumericStdNoWarnings 1
+set StdArithNoWarnings 1
 
 # ================================================================================
 # Add Waveforms

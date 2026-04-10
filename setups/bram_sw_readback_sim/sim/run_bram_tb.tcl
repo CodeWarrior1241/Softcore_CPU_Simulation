@@ -219,8 +219,17 @@ if {[file exists $axi_bram_ctrl_lib]} {
 
 puts "Adding IP simulation models..."
 
-# Add the blk_mem_gen simulation library first (the underlying IP model)
-set blk_mem_gen_lib "$project_dir/NEORV32_Simulation.gen/sources_1/bd/Top/ipshared/42f3/simulation/blk_mem_gen_v8_4.v"
+# Add the blk_mem_gen simulation library first (the underlying IP model).
+# The ipshared/<hash>/ directory name is content-derived and changes when Vivado
+# regenerates the IP cache. Use glob to find blk_mem_gen_v8_4.v under any hash.
+set ipshared_dir "$project_dir/NEORV32_Simulation.gen/sources_1/bd/Top/ipshared"
+set blk_mem_gen_matches [glob -nocomplain "$ipshared_dir/*/simulation/blk_mem_gen_v8_4.v"]
+if {[llength $blk_mem_gen_matches] == 0} {
+    error "ERROR: blk_mem_gen_v8_4.v not found under $ipshared_dir/*/simulation/. Has the project been built and IP output products generated?"
+} elseif {[llength $blk_mem_gen_matches] > 1} {
+    puts "WARNING: multiple blk_mem_gen_v8_4.v matches found, using first: [lindex $blk_mem_gen_matches 0]"
+}
+set blk_mem_gen_lib [lindex $blk_mem_gen_matches 0]
 puts "Adding blk_mem_gen simulation library: $blk_mem_gen_lib"
 add_files -fileset sim_bram_tb -norecurse $blk_mem_gen_lib
 

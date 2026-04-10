@@ -20,7 +20,7 @@
 
 variable project_name "NEORV32_Simulation"
 variable part "xcau15p-ffvb676-2-e"
-variable project_dir [file dirname [info script]]
+variable project_dir [file normalize [file dirname [info script]]]
 variable top_level_bd_name "Top"
 
 ###############################################################################
@@ -158,7 +158,7 @@ proc build_all {} {
     # This will fail gracefully if board files are missing - we just use the part
     puts "INFO: Creating project..."
 
-    if {[catch {create_project $project_name . -part $part -force} result]} {
+    if {[catch {create_project $project_name $project_dir -part $part -force} result]} {
         puts "ERROR: Failed to create project: $result"
         return -1
     }
@@ -885,8 +885,8 @@ update_compile_order -fileset sim_1
 
 # Make sure the BD and design is exported for third-party simulators to run with
 set_property top vivado_tb [current_fileset -simset]
-#export_simulation -simulator questa -directory NEORV32_Simulation.ip_user_files/sim_scripts -use_ip_compiled_libs -force
-export_simulation -directory NEORV32_Simulation.ip_user_files/sim_scripts -use_ip_compiled_libs -force
+#export_simulation -simulator questa -directory $project_dir/NEORV32_Simulation.ip_user_files/sim_scripts -use_ip_compiled_libs -force
+export_simulation -directory $project_dir/NEORV32_Simulation.ip_user_files/sim_scripts -use_ip_compiled_libs -force
 
 # Apply the Questa compile.do fix
 fix_questa_compile_do $project_dir

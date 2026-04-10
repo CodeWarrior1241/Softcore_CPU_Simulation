@@ -11,7 +11,7 @@ REM Configuration
 set NVC=nvc
 set WORK_DIR=work
 set TOP_ENTITY=neorv32_tb
-set SIM_TIME=150ms
+set SIM_TIME=500ms
 set WAVE_FILE=neorv32_tb.fst
 set QUIET=0
 
@@ -51,14 +51,14 @@ if "%~1"=="--help" (
     echo Usage: run_sim.bat [options]
     echo.
     echo Options:
-    echo   --time TIME    Set simulation time (default: 150ms)
+    echo   --time TIME    Set simulation time (default: 500ms)
     echo   --wave FILE    Set waveform output file (default: neorv32_tb.fst)
     echo   --quiet        Suppress simulation progress output
     echo   --clean        Remove work directory and generated files
     echo   --help         Show this help message
     echo.
     echo Examples:
-    echo   run_sim.bat                    Run with defaults (150ms)
+    echo   run_sim.bat                    Run with defaults (500ms)
     echo   run_sim.bat --time 50ms        Run for 50ms
     echo   run_sim.bat --wave sim.fst     Output waveform to sim.fst
     echo   run_sim.bat --quiet            Run without progress output

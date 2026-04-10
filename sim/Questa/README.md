@@ -14,7 +14,7 @@ This directory contains scripts for simulating the NEORV32 RISC-V processor usin
 
 ## Changing the Application Program
 
-The simulation runs whatever program is compiled into `rtl/core/neorv32_application_image.vhd`. To simulate a different program:
+The simulation runs whatever program is compiled into `rtl/core/neorv32_imem_image.vhd`. To simulate a different program:
 
 ### Step 1: Build the Program
 
@@ -25,7 +25,7 @@ cd sw\example\hello_world
 make clean_all exe
 ```
 
-This generates `neorv32_application_image.vhd` in `rtl/core/`.
+This generates `neorv32_imem_image.vhd` in `rtl/core/`.
 
 ### Step 2: Recompile and Re-run Simulation
 

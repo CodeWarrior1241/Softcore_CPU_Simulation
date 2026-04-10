@@ -10,7 +10,7 @@ setlocal enabledelayedexpansion
 REM Configuration
 set VSIM="C:\Program Files\Mentor_Graphics\Questa_Prime_2025.1\win64\vsim.exe"
 set SIM_MODE=gui
-set SIM_TIME=150ms
+set SIM_TIME=500ms
 
 REM Change to script directory
 cd /d "%~dp0"
@@ -53,14 +53,14 @@ if "%~1"=="--help" (
     echo Usage: run_sim.bat [options]
     echo.
     echo Options:
-    echo   --time TIME    Set simulation time (default: 150ms)
+    echo   --time TIME    Set simulation time (default: 500ms)
     echo   --gui          Run in GUI mode (default)
     echo   --batch        Run in batch/command-line mode
     echo   --clean        Remove work directory and generated files
     echo   --help         Show this help message
     echo.
     echo Examples:
-    echo   run_sim.bat                    Run with defaults (150ms, GUI)
+    echo   run_sim.bat                    Run with defaults (500ms, GUI)
     echo   run_sim.bat --time 50ms        Run for 50ms
     echo   run_sim.bat --batch            Run in batch mode
     echo   run_sim.bat --time 20ms --batch
