@@ -564,11 +564,27 @@ set_property -dict [list \
 set_property -dict [list \
     CONFIG.TDD_DISABLE {1} \
     CONFIG.IODELAY_CTRL {0} \
+    CONFIG.DELAY_REFCLK_FREQUENCY {300} \
     CONFIG.RX_NODPA {1} \
     CONFIG.ADC_DCFILTER_DISABLE {1} \
     CONFIG.ADC_IQCORRECTION_DISABLE {1} \
     CONFIG.DAC_IQCORRECTION_DISABLE {1} \
 ] [get_bd_cells $axi_ad9361]
+
+# DELAY_REFCLK_FREQUENCY override:
+# After upstream deps/hdl merge, the xcau15p part is correctly auto-detected
+# as UltraScale+ (FPGA_TECHNOLOGY=3) by adi_xilinx_device_info_enc.tcl. This
+# now causes ad_data_in.v to instantiate IDELAYE3 primitives in the RX
+# capture path (the gate is FPGA_TECHNOLOGY in {ULTRASCALE,ULTRASCALE_PLUS}
+# AND IODELAY_ENABLE==1 — the latter is not exposed by axi_ad9361, only
+# IODELAY_CTRL is, which gates the controller, not the delays themselves).
+# IDELAYE3 requires REFCLK_FREQUENCY in 300-2667 MHz on UltraScale+; the
+# default of 200 MHz is the UltraScale-era value and triggers a $finish in
+# the IDELAYE3 simulation model. Setting DELAY_REFCLK_FREQUENCY to 300 MHz
+# satisfies the elaboration check. The actual delay values don't matter for
+# this loopback simulation since the testbench drives all signals with zero
+# skew (RX_NODPA=1 disables phase alignment, IODELAY_CTRL=0 disables tap
+# calibration).
 
 # Create external ports for AD9361 LVDS interface
 # RX ports
