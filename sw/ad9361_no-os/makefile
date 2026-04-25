@@ -12,11 +12,11 @@ USER_FLAGS += -ggdb -gdwarf-3
 # Adjust processor IMEM size (128KB — AD9361 driver overflows 64KB by ~17KB)
 USER_FLAGS += -Wl,--defsym,__neorv32_rom_size=128k
 
-# Adjust processor DMEM size (16KB available)
-USER_FLAGS += -Wl,--defsym,__neorv32_ram_size=16k
+# Adjust processor DMEM size (32KB available)
+USER_FLAGS += -Wl,--defsym,__neorv32_ram_size=32k
 
 # Heap for AD9361 driver allocations (ad9361_rf_phy, clocks, descriptors)
-USER_FLAGS += -Wl,--defsym,__neorv32_heap_size=4k
+USER_FLAGS += -Wl,--defsym,__neorv32_heap_size=16k
 
 # Exclude no-os AXI ADC/DAC drivers (axi_ad9361 is programmed separately)
 USER_FLAGS += -DAXI_ADC_NOT_PRESENT

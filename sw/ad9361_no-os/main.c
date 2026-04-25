@@ -494,7 +494,7 @@ int main(void)
 			uint32_t tx_count = BRIDGE_REG(BRIDGE_REG_STATUS_TX_COUNT);
 			uint32_t rx_count = BRIDGE_REG(BRIDGE_REG_STATUS_RX_COUNT);
 			uint32_t gpio_status = neorv32_gpio_port_get() & 0xFF;
-			neorv32_uart0_printf("ENSM:%s RF:%s STATE:%u TX_CNT:%u RX_CNT:%u GPIO:0x%02x\n",
+			neorv32_uart0_printf("ENSM:%s RF:%s STATE:%u TX_CNT:%u RX_CNT:%u GPIO:0x%x\n",
 					     (ensm_mode < 8) ? ensm_mode_str[ensm_mode] : "?",
 					     rf_enabled ? "ON" : "OFF",
 					     (unsigned)bridge_state,

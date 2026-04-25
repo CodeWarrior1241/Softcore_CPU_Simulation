@@ -18,7 +18,7 @@
 #define BRAM_BASE               0xC0000000UL
 
 /* System clocks */
-#define CPU_CLOCK_HZ        100000000UL
+#define CPU_CLOCK_HZ        150000000UL
 #define BAUD_RATE           115200
 
 #endif /* PARAMETERS_H_ */
