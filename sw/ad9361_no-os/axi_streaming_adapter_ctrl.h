@@ -47,7 +47,11 @@
 #define BRIDGE_STATE_RECEIVE_QPSK_DATA         3
 
 /* ---------- Polling timeout ---------- */
-#define BRIDGE_POLL_TIMEOUT           500000
+/* 500k iterations at 150 MHz CPU ≈ 3 ms — too short to distinguish "stream
+ * silent" from "wait races a refill cycle". Bumped to 50M ≈ 330 ms so that
+ * an enable_snapshot timeout is a much stronger signal of "samples genuinely
+ * not flowing", not just "we polled at a bad moment". */
+#define BRIDGE_POLL_TIMEOUT           50000000
 
 /* ---------- Inline helpers ---------- */
 

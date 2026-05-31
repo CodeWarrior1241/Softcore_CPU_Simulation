@@ -86,6 +86,33 @@ module tb_top;
     parameter NUM_COE_SAMPLES       = 1024;
     parameter NUM_READBACK_CYCLES   = 3;
 
+    //--------------------------------------------------------------------------
+    // ADC stimulus realism parameters
+    //--------------------------------------------------------------------------
+    // The original TB drove adc_valid_i0/q0 high every l_clk cycle and updated
+    // adc_data_i0/q0 every cycle. That doesn't match the AD9361 in 1R1T DDR
+    // LVDS mode, where:
+    //   - adc_valid_i0/q0 pulses at the sample rate (~50% duty on l_clk),
+    //     not every cycle
+    //   - adc_data_i0/q0 is held stable between valid pulses, not churned
+    //
+    // The original TB also started driving stimulus within one l_clk cycle of
+    // reset release. In HW the adapter sits idle for many ms (chip init,
+    // bridge load, etc.) before the chip starts producing samples — so the
+    // adapter pipeline has been clocking through "no valid pulses" iterations
+    // for a long time before the first capture. The sim now models this with
+    // an explicit idle window.
+    //
+    // These three changes (pulsed valid, held data, idle window) bring the sim
+    // closer to HW so it can repro any HLS state-machine bug that depends on
+    // the gap between captures or on adapter behavior during the long
+    // pre-stimulus idle. CDC paths are intentionally NOT modified — they are
+    // verified by Vivado constraint reports in HW build.
+    //--------------------------------------------------------------------------
+    parameter STIM_IDLE_NS          = 100_000;  // 100 us pre-stimulus idle
+    parameter STIM_VALID_HIGH_CYC   = 1;        // l_clk cycles valid=1
+    parameter STIM_VALID_LOW_CYC    = 1;        // l_clk cycles valid=0 (data held)
+
     // Bridge register offsets (14-bit addr, from axi_streaming_adapter_ctrl.h)
     parameter [13:0] BRIDGE_REG_ENABLE       = 14'h0010;
     parameter [13:0] BRIDGE_REG_RX_READ_DONE = 14'h0014;
@@ -232,31 +259,86 @@ module tb_top;
     end
 
     //--------------------------------------------------------------------------
-    // ADC stimulus: continuously feed COE data on l_clk (125 MHz)
-    // Starts after reset + PLL lock, loops forever (same as axi_ad9361 would)
+    // ADC stimulus — HW-faithful pulsed-valid generator
+    //--------------------------------------------------------------------------
+    // Simulates what the AD9361 IP delivers to the adapter in 1R1T DDR LVDS:
+    //   1. Idle window after reset (no valid pulses, no data) lasting
+    //      STIM_IDLE_NS, modelling the HW interval between fabric reset
+    //      release and the chip actually producing samples (chip init,
+    //      ad9361_post_setup, bridge_load_tx_data, bridge_enable, GPIO
+    //      up_enable=1 — all happens before adc_valid first pulses).
+    //
+    //   2. Once active, adc_valid_i0/q0 pulses with a STIM_VALID_HIGH_CYC /
+    //      STIM_VALID_LOW_CYC duty cycle (default 1/1 = 50% duty) instead of
+    //      being held high every cycle. This matches the chip's behavior of
+    //      delivering one I+Q sample every two l_clk cycles.
+    //
+    //   3. adc_data_i0/q0 is updated only on the FIRST cycle of each valid
+    //      pulse (when valid asserts) and held stable for the rest of the
+    //      pulse and the following low period. This matches HW: the chip
+    //      drives the data buses with a held value between sample events,
+    //      it does not churn data on every l_clk cycle.
+    //
+    // The original "valid=1 always, churn data every cycle" stimulus pattern
+    // could mask any HLS pipeline bug whose behavior depends on rx_valid
+    // going low, or on adc_data being stable across multiple cycles. This
+    // updated stimulus exercises both gaps.
+    //
+    // adc_enable_i0/q0 is asserted before any data flows and held throughout
+    // (the bit is set by no-OS post_setup at boot in HW; the channel-enable
+    // CDC is verified by Vivado constraint analysis).
     //--------------------------------------------------------------------------
     integer coe_index;
     integer adc_samples_sent;
+    integer cyc;
+
     always begin
         wait(system_resetn && clk_locked);
         @(posedge l_clk);
 
+        // Initial state: enables high (channel selected), but no valid and
+        // no data — adapter pipeline runs with rx_valid=0 every cycle.
         adc_enable_i0 = 1; adc_enable_q0 = 1;
-        adc_valid_i0  = 1; adc_valid_q0  = 1;
-        coe_index = 0;
+        adc_valid_i0  = 0; adc_valid_q0  = 0;
+        adc_data_i0   = 16'h0000;
+        adc_data_q0   = 16'h0000;
+        coe_index     = 0;
         adc_samples_sent = 0;
 
-        $display("[%0t] ADC stimulus started (COE data on l_clk)", $time);
+        $display("[%0t] ADC stimulus: idle phase (%0d ns) — adapter clocks with no captures",
+                 $time, STIM_IDLE_NS);
+
+        // Idle window: no valid pulses, adapter sits in CAPTURING with
+        // rx_fill_level stuck at 0. Models the HW pre-stimulus interval.
+        #STIM_IDLE_NS;
+        @(posedge l_clk);
+
+        $display("[%0t] ADC stimulus: pulsed-valid phase begins (duty %0d/%0d)",
+                 $time, STIM_VALID_HIGH_CYC, STIM_VALID_HIGH_CYC + STIM_VALID_LOW_CYC);
 
         forever begin
-            adc_data_i0 = coe_data[coe_index][15:0];
-            adc_data_q0 = coe_data[coe_index][31:16];
-            @(posedge l_clk);
+            // Phase A: assert valid, present a NEW sample on adc_data
+            adc_data_i0  = coe_data[coe_index][15:0];
+            adc_data_q0  = coe_data[coe_index][31:16];
+            adc_valid_i0 = 1; adc_valid_q0 = 1;
+
+            // Hold for STIM_VALID_HIGH_CYC l_clk cycles (default 1).
+            // The adapter captures on the first cycle where rx_valid is
+            // high and rx_fill_level < BRAM_DEPTH.
+            for (cyc = 0; cyc < STIM_VALID_HIGH_CYC; cyc++)
+                @(posedge l_clk);
 
             adc_samples_sent = adc_samples_sent + 1;
             coe_index = coe_index + 1;
             if (coe_index >= NUM_COE_SAMPLES)
                 coe_index = 0;
+
+            // Phase B: deassert valid; HOLD adc_data at the previous value
+            // (intentionally do NOT update adc_data here — HW holds it).
+            adc_valid_i0 = 0; adc_valid_q0 = 0;
+
+            for (cyc = 0; cyc < STIM_VALID_LOW_CYC; cyc++)
+                @(posedge l_clk);
         end
     end
 

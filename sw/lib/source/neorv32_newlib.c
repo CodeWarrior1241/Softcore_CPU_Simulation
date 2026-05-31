@@ -259,7 +259,11 @@ int _write(int file, char *ptr, int len) {
   if ((file == STDOUT_FILENO) || (file == STDERR_FILENO)) {
     if (neorv32_uart_available(NEORV32_UART0)) {
       while (len--) {
-        neorv32_uart_putc(NEORV32_UART0, *ptr++);
+        char c = *ptr++;
+        if (c == '\n') { // LF -> CRLF, matching neorv32_uart_puts/vprintf so
+          neorv32_uart_putc(NEORV32_UART0, '\r'); // printf()/printk() lines don't stair-step
+        }
+        neorv32_uart_putc(NEORV32_UART0, c);
         write_cnt++;
       }
       return write_cnt;

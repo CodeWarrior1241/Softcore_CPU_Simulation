@@ -37,8 +37,10 @@ TOP_MODULE    := tb_top
 HLS_ADAPTER_DIR := $(SRC_DIR)/axiad9361_adapter/axiad9361_adapter/hls/impl/verilog
 
 HLS_ADAPTER_SOURCES := \
-	$(HLS_ADAPTER_DIR)/axi_ad9361_adapter_tx_bram_RAM_1P_BRAM_1R1W.v \
+	$(HLS_ADAPTER_DIR)/axi_ad9361_adapter_tx_process_tx_bram_RAM_1P_BRAM_1R1W.v \
 	$(HLS_ADAPTER_DIR)/axi_ad9361_adapter_regslice_both.v \
+	$(HLS_ADAPTER_DIR)/axi_ad9361_adapter_tx_process.v \
+	$(HLS_ADAPTER_DIR)/axi_ad9361_adapter_rx_process.v \
 	$(HLS_ADAPTER_DIR)/axi_ad9361_adapter.v
 
 #------------------------------------------------------------------------------
