@@ -936,9 +936,13 @@ AD9361_InitParam default_init_param = {
 	1,		// pp_rx_swap_enable
 	0,		// tx_channel_swap_enable
 	0,		// rx_channel_swap_enable
-	0,		// rx_frame_pulse_mode_enable  (LEVEL mode -- experiment for 1R1T;
-				//   level-mode hypothesis was based on a hardwired-zero
-				//   diagnostic bit; chip+FPGA were actually agreeing all along)
+	1,		// rx_frame_pulse_mode_enable  (PULSE mode = ADI reference 0x010=0xC8).
+				//   ILA showed RX_FRAME stuck HIGH (i_rx_frame D0/D1) while data lanes
+				//   toggle: that is the LEVEL-mode signature. axi_ad9361_lvds_if.v
+				//   delineates on a frame TRANSITION (1R1T case 5'b10011 needs
+				//   rx_frame 11->00 each l_clk); a static-high frame falls through to
+				//   default => adc_valid=0, adc_data=0x0000. Pulse mode toggles the
+				//   frame so the deserializer can latch samples.
 	0,		// two_t_two_r_timing_enable    (back to ADI reference default)
 	0,		// invert_data_bus_enable
 	0,		// invert_data_clk_enable
