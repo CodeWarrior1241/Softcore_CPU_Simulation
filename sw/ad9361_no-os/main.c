@@ -35,6 +35,8 @@
 #define CMD_STOP_BIST       "stop_bist"
 #define CMD_PINCTL_RX       "pinctl_rx"
 #define CMD_PINCTL_OFF      "pinctl_off"
+#define CMD_LOOPBACK_ON     "loopback_on"
+#define CMD_LOOPBACK_OFF    "loopback_off"
 
 /* Response strings */
 #define RESP_RF_ENABLED     "rf_enabled\n"
@@ -1235,6 +1237,16 @@ int main(void)
 	dump_chip_status(phy);
 	neorv32_uart0_puts("[ad9361_no-os] === end diagnostic dump ===\n\n");
 
+	/* 10b. Default operating mode: route TX -> RX through the AD9361 internal
+	 * digital baseband loopback (reg 0x3F5 DATA_PORT_LOOP_TEST_ENABLE), which
+	 * bypasses DAC/mixers/RF/ADC entirely. RX then captures the looped TX
+	 * samples directly, validating the datapath + IQ packing with zero RF/DSP.
+	 * Enabled AFTER all boot calibration (dig_tune saves/restores loopback).
+	 * Toggle at runtime: loopback_off (-> external SMA cable) / loopback_on. */
+	ad9361_bist_prbs(phy, BIST_DISABLE);   /* ensure RX PRBS injection is off */
+	ad9361_bist_loopback(phy, 1);          /* AD9361 internal TX->RX BB loopback */
+	neorv32_uart0_puts("[ad9361_no-os] Internal BB loopback ENABLED (TX->RX, RF bypassed)\n");
+
 	/* 11. UART command loop */
 	neorv32_uart0_puts("[ad9361_no-os] Ready — awaiting commands\n");
 	char cmd_buffer[CMD_BUFFER_SIZE];
@@ -1273,9 +1285,10 @@ int main(void)
 			uint32_t tx_count = BRIDGE_REG(BRIDGE_REG_STATUS_TX_COUNT);
 			uint32_t rx_count = BRIDGE_REG(BRIDGE_REG_STATUS_RX_COUNT);
 			uint32_t gpio_status = neorv32_gpio_port_get() & 0xFF;
-			neorv32_uart0_printf("ENSM:%s RF:%s STATE:%u TX_CNT:%u RX_CNT:%u GPIO:0x%x\n",
+			neorv32_uart0_printf("ENSM:%s RF:%s LB:%d STATE:%u TX_CNT:%u RX_CNT:%u GPIO:0x%x\n",
 					     (ensm_mode < 8) ? ensm_mode_str[ensm_mode] : "?",
 					     rf_enabled ? "ON" : "OFF",
+					     (int)phy->bist_loopback_mode,
 					     (unsigned)bridge_state,
 					     (unsigned)tx_count,
 					     (unsigned)rx_count,
@@ -1340,6 +1353,19 @@ int main(void)
 			int32_t cfg = ad9361_spi_read(phy->spi, REG_ENSM_CONFIG_1);
 			neorv32_uart0_printf("pinctl_off ENSM_CFG1=0x%x (SPI FDD restored)\n",
 					     (unsigned)(cfg & 0xFF));
+
+		} else if (strcmp_cmd(cmd_buffer, CMD_LOOPBACK_ON)) {
+			/* AD9361 internal TX->RX baseband loopback (RF bypassed). */
+			ad9361_bist_prbs(phy, BIST_DISABLE);
+			int32_t r = ad9361_bist_loopback(phy, 1);
+			neorv32_uart0_printf("loopback_on mode=%d ret=%d\n",
+					     (int)phy->bist_loopback_mode, (int)r);
+
+		} else if (strcmp_cmd(cmd_buffer, CMD_LOOPBACK_OFF)) {
+			/* Disable internal loopback; RX listens to the external SMA cable / RF. */
+			int32_t r = ad9361_bist_loopback(phy, 0);
+			neorv32_uart0_printf("loopback_off mode=%d ret=%d\n",
+					     (int)phy->bist_loopback_mode, (int)r);
 		}
 		/* Unknown commands silently ignored */
 	}
