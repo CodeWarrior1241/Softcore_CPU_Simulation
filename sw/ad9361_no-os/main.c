@@ -1126,6 +1126,20 @@ int main(void)
 	AD9361_REG(0x0480) &= ~(1u << 9);  /* ch1_I (unused in 1R1T but keep symmetric) */
 	AD9361_REG(0x04C0) &= ~(1u << 9);  /* ch1_Q */
 
+	/* 6.57. Select the DAC channel data source = DMA (external/streamed input).
+	 *
+	 * The ADI DAC datapath only asserts dac_enable_* to the external source
+	 * (our axi_ad9361_adapter) when a channel's data_sel = DMA. The adapter
+	 * gates its output on that signal (dac_data = dac_enable ? tx : 0), so until
+	 * data_sel is set the IP holds dac_enable LOW and the adapter emits zero --
+	 * TX never carries the QPSK samples and the loopback collapses to the
+	 * origin. Default after DAC reset is DDS/zero; axi_dac_init() would set
+	 * this, but we don't call it. CHAN_CNTRL_7[3:0] = data_sel (DMA = 2).
+	 * Mirrors axi_dac_set_datasel(): write each channel, then pulse SYNC. */
+	AD9361_REG(0x4418 + 0 * 0x40) = AXI_DAC_DATA_SEL_DMA;  /* DAC ch0 = TX1 I */
+	AD9361_REG(0x4418 + 1 * 0x40) = AXI_DAC_DATA_SEL_DMA;  /* DAC ch1 = TX1 Q */
+	AD9361_REG(0x4044) = 0x1;        /* DAC SYNC_CONTROL: latch data-source change */
+
 	/* 6.6. dig_tune diagnostic: probe what dig_tune's check_pn would see.
 	 * Tests one (clock_delay, data_delay) tap at the middle of range with
 	 * BIST PRBS injection enabled. Output distinguishes failure mode A
