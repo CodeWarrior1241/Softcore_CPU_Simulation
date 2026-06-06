@@ -1237,15 +1237,41 @@ int main(void)
 	dump_chip_status(phy);
 	neorv32_uart0_puts("[ad9361_no-os] === end diagnostic dump ===\n\n");
 
-	/* 10b. Default operating mode: route TX -> RX through the AD9361 internal
-	 * digital baseband loopback (reg 0x3F5 DATA_PORT_LOOP_TEST_ENABLE), which
-	 * bypasses DAC/mixers/RF/ADC entirely. RX then captures the looped TX
-	 * samples directly, validating the datapath + IQ packing with zero RF/DSP.
-	 * Enabled AFTER all boot calibration (dig_tune saves/restores loopback).
-	 * Toggle at runtime: loopback_off (-> external SMA cable) / loopback_on. */
-	ad9361_bist_prbs(phy, BIST_DISABLE);   /* ensure RX PRBS injection is off */
-	ad9361_bist_loopback(phy, 1);          /* AD9361 internal TX->RX BB loopback */
-	neorv32_uart0_puts("[ad9361_no-os] Internal BB loopback ENABLED (TX->RX, RF bypassed)\n");
+	/* 10b. Default operating mode: REAL RF PATH (external SMA cable).
+	 *
+	 * RF bring-up R1: the device no longer boots into the AD9361 internal
+	 * baseband loopback (reg 0x3F5 DATA_PORT_LOOP_TEST_ENABLE). RX now listens
+	 * to the SMA cable:  TX1A_OUT -> external 40-60 dB attenuator pad -> RX1A_IN.
+	 * The samples therefore traverse DAC -> mixer -> RF -> mixer -> ADC and pick
+	 * up real impairments (the constellation will smear/rotate until the R2 TX
+	 * pulse shaping and R3 RX DSP are in place — that is expected).
+	 *
+	 * The internal BB loopback is still the digital reference / noise floor,
+	 * one command away: `loopback_on` re-enables it, `loopback_off` returns
+	 * here, and get_status reports LB: so you can tell which path is live.
+	 *
+	 * !!! HARDWARE: the external attenuator pad is MANDATORY. Driving full TX
+	 *     power straight into RX1A_IN saturates / damages the RX front end. */
+	ad9361_bist_prbs(phy, BIST_DISABLE);   /* no RX PRBS injection */
+	ad9361_bist_loopback(phy, 0);          /* RF path: internal BB loopback OFF */
+
+	/* RX gain: MANUAL (MGC) for a STABLE bring-up constellation. The init-param
+	 * default is slow-attack AGC (gc_rx1_mode=2), which hunts and makes the
+	 * cluster breathe while the link is being tuned. Switch RX1 to MGC and set
+	 * a defined mid-table starting gain; tune on hardware from the RSSI / RX
+	 * gain readback in get_chip_status. */
+	ad9361_set_rx_gain_control_mode(phy, 0, RF_GAIN_MGC);
+	ad9361_set_rx_rf_gain(phy, 0, 30);         /* dB — starting point, tune to taste */
+
+	/* TX attenuation: defined starting point into the external pad. 10 dB keeps
+	 * the DAC out of hard clip and leaves headroom for the RRC overshoot the R2
+	 * waveform will add; with a 40-60 dB pad this still lands a usable level at
+	 * RX. Tune against RSSI on hardware. (Init-param tx_attenuation_mdB=0 was
+	 * max power, appropriate only for the now-retired internal-loopback path.) */
+	ad9361_set_tx_attenuation(phy, 0, 10000);  /* mdB */
+
+	neorv32_uart0_puts("[ad9361_no-os] Boot path: RF (SMA cable) — MGC rx_gain=30dB, tx_atten=10dB\n");
+	neorv32_uart0_puts("[ad9361_no-os] !!! external 40-60 dB pad REQUIRED between TX1A_OUT and RX1A_IN\n");
 
 	/* 11. UART command loop */
 	neorv32_uart0_puts("[ad9361_no-os] Ready — awaiting commands\n");
