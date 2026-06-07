@@ -37,6 +37,9 @@
 #define CMD_PINCTL_OFF      "pinctl_off"
 #define CMD_LOOPBACK_ON     "loopback_on"
 #define CMD_LOOPBACK_OFF    "loopback_off"
+#define CMD_SET_TX_ATTEN    "set_tx_atten"   /* + integer mdB  (R4 sweep) */
+#define CMD_SET_RX_GAIN     "set_rx_gain"    /* + integer dB   (R4 sweep) */
+#define CMD_GET_RSSI        "get_rssi"       /* compact RSSI + gain line */
 
 /* Response strings */
 #define RESP_RF_ENABLED     "rf_enabled\n"
@@ -109,6 +112,36 @@ static int strcmp_cmd(const char *cmd, const char *ref)
 		ref++;
 	}
 	return (*cmd == '\0' || *cmd == '\r' || *cmd == '\n');
+}
+
+/* If `cmd` starts with `prefix` followed by whitespace + a (signed) integer,
+ * parse the integer into *arg and return 1. Else return 0. Used by the R4
+ * runtime tuning commands ("set_tx_atten 10000", "set_rx_gain 30"). */
+static int parse_cmd_arg(const char *cmd, const char *prefix, long *arg)
+{
+	while (*prefix) {
+		if (*cmd != *prefix)
+			return 0;
+		cmd++;
+		prefix++;
+	}
+	if (*cmd != ' ' && *cmd != '\t')
+		return 0;
+	while (*cmd == ' ' || *cmd == '\t')
+		cmd++;
+
+	int neg = 0;
+	if (*cmd == '-') { neg = 1; cmd++; }
+	if (*cmd < '0' || *cmd > '9')
+		return 0;
+
+	long v = 0;
+	while (*cmd >= '0' && *cmd <= '9') {
+		v = v * 10 + (*cmd - '0');
+		cmd++;
+	}
+	*arg = neg ? -v : v;
+	return 1;
 }
 
 /* Send 1024 RX samples from bridge RX buffer as 4096 raw bytes over UART. */
@@ -1276,6 +1309,7 @@ int main(void)
 	/* 11. UART command loop */
 	neorv32_uart0_puts("[ad9361_no-os] Ready — awaiting commands\n");
 	char cmd_buffer[CMD_BUFFER_SIZE];
+	long cmd_arg;
 
 	while (1) {
 		int len = read_command(cmd_buffer, CMD_BUFFER_SIZE);
@@ -1392,6 +1426,28 @@ int main(void)
 			int32_t r = ad9361_bist_loopback(phy, 0);
 			neorv32_uart0_printf("loopback_off mode=%d ret=%d\n",
 					     (int)phy->bist_loopback_mode, (int)r);
+
+		} else if (parse_cmd_arg(cmd_buffer, CMD_SET_TX_ATTEN, &cmd_arg)) {
+			/* R4: runtime TX attenuation (mdB) for the atten/gain sweep. */
+			int32_t r = ad9361_set_tx_attenuation(phy, 0, (uint32_t)cmd_arg);
+			neorv32_uart0_printf("tx_atten_set %d mdB ret=%d\n",
+					     (int)cmd_arg, (int)r);
+
+		} else if (parse_cmd_arg(cmd_buffer, CMD_SET_RX_GAIN, &cmd_arg)) {
+			/* R4: runtime manual RX gain (dB). Requires MGC mode (set at boot). */
+			int32_t r = ad9361_set_rx_rf_gain(phy, 0, (int32_t)cmd_arg);
+			neorv32_uart0_printf("rx_gain_set %d dB ret=%d\n",
+					     (int)cmd_arg, (int)r);
+
+		} else if (strcmp_cmd(cmd_buffer, CMD_GET_RSSI)) {
+			/* R4: compact single-line RSSI + current RX gain for sweep logging. */
+			struct rf_rssi rssi = {0};
+			rssi.ant = 0;
+			int32_t r = ad9361_get_rx_rssi(phy, 0, &rssi);
+			int32_t g = 0;
+			ad9361_get_rx_rf_gain(phy, 0, &g);
+			neorv32_uart0_printf("rssi symbol=%u gain=%d ret=%d\n",
+					     (unsigned)rssi.symbol, (int)g, (int)r);
 		}
 		/* Unknown commands silently ignored */
 	}
