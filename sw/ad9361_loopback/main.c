@@ -29,6 +29,18 @@
  *   [4] milestone: all RX readback cycles done
  *   [5] result: 1 = PASS, 0 = FAIL
  *   [6] result valid (asserted once test is complete — testbench auto-terminates)
+ *   [8] pwr_dn: fabric power-down lever (1 = down).  Gates the 300 MHz IODELAY
+ *       refclk via BUFGCE and holds the axi_ad9361 + TX/RX datapath in reset.
+ *   [9] TB-only model lever: 1 = AD9361 in SLEEP, so DATA_CLK (and l_clk) is
+ *       stopped.  There is no chip/SPI/ENSM here, so the firmware drives this
+ *       bit to tell the testbench to park stim_clk.  Kept separate from pwr_dn
+ *       so the wake order matches hardware: l_clk returns ([9]=0) BEFORE pwr_dn
+ *       clears ([8]=0), which is what the l_clk-domain reset + XPM synchronizer
+ *       require (a reset released into a dead clock domain is unsafe).
+ *
+ * Bits [0..6] are the original 8-bit map; [8]/[9] live in the upper half of the
+ * now-16-bit gpio_o (IO_GPIO_OUT_NUM was widened 8->16 for the power-down bits).
+ * [9] needs no BD slice — only the testbench observes it.
  */
 
 #include <neorv32.h>
@@ -47,6 +59,8 @@
 #define GPIO_RX_DONE       4   // GPIO[4] = RX readback cycles done
 #define GPIO_RESULT        5   // GPIO[5] = 1=PASS 0=FAIL
 #define GPIO_RESULT_VALID  6   // GPIO[6] = result valid (auto-terminate trigger)
+#define GPIO_PWRDN_PIN     8   // GPIO[8] = pwr_dn: fabric clock-gate + reset-hold
+#define GPIO_LCLK_DEAD_PIN 9   // GPIO[9] = TB-only: model AD9361 SLEEP (stops l_clk)
 
 /**********************************************************************//**
  * @name axi_ad9361 register definitions (base 0x44A00000)
@@ -90,6 +104,20 @@
 
 /** Timeout: max polling iterations */
 #define POLL_TIMEOUT 500000
+
+/** Directed power-gate cycle busy-loop delays (sim-time only — this firmware
+ *  has no no_os timer).  Calibrated against the measured ~207 ns per volatile
+ *  loop iteration on this NEORV32 build:
+ *    LCLK_DEAD_SETTLE  ~0.4 ms — let l_clk die / return around each pwr_dn edge
+ *    PWRDN_HOLD        ~1.7 ms — stay down; with the dead-settle this keeps
+ *                                l_clk stopped >1 ms so the TB's death detector
+ *                                trips exactly once
+ *    PWRUP_SETTLE      ~0.4 ms — fabric reset re-sequence after pwr_dn clears
+ *  The whole cycle plus re-config/re-prime/re-readback then finishes well
+ *  inside the testbench's 15 ms safety timeout. */
+#define LCLK_DEAD_SETTLE_ITERS  2000
+#define PWRDN_HOLD_ITERS        8000
+#define PWRUP_SETTLE_ITERS      2000
 /**@}*/
 
 
@@ -102,20 +130,10 @@ static int readback_rx(void) {
   return nonzero;
 }
 
-
-int main(void) {
-
-  neorv32_rte_setup();
-
-  if (neorv32_uart0_available() == 0) return 1;
-  if (neorv32_gpio_available() == 0) return 1;
-
-  neorv32_uart0_setup(BAUD_RATE, 0);
-
-  // ==================================================================
-  // Configure axi_ad9361 core registers
-  // ==================================================================
-
+// Configure (or re-configure) the axi_ad9361 core datapath registers.
+// Run at boot and again after the power-gate cycle: the gated s_axi_aresetn
+// returns these registers to their power-on defaults during power-down.
+static void configure_ad9361(void) {
   AD9361_REG(AD9361_REG_ADC_CNTRL) = 0x00000000;
   AD9361_REG(AD9361_REG_DAC_CNTRL) = 0x00000000;
   AD9361_REG(AD9361_REG_DAC_RATE)  = 0x00000003;
@@ -136,7 +154,59 @@ int main(void) {
   AD9361_REG(AD9361_REG_ADC_RESET) = 0x00000003;
   AD9361_REG(AD9361_REG_DAC_RESET) = 0x00000003;
 
-  for (volatile int i = 0; i < 2000; i++) {}
+  for (volatile int i = 0; i < 2000; i++) {}  // let the config settle
+}
+
+// Fill the bridge TX sample buffer with the known ramp pattern.
+static void load_tx_buffer(void) {
+  volatile uint32_t *tx_buf = (volatile uint32_t *)(AXI_STREAMING_ADAPTER_BASE + BRIDGE_TX_DATA_BASE);
+  for (int i = 0; i < BRIDGE_SAMPLE_DEPTH; i++) {
+    tx_buf[i] = ((uint32_t)(i + 0x1000) << 16) | (i & 0xFFFF);
+  }
+}
+
+// Run NUM_READBACK_CYCLES capture cycles; return the number of passing cycles.
+// Cycle 0 is a warm-up (the TX burst is still propagating through the
+// DAC→LVDS→loopback→ADC pipeline, so the first buffer is pre-loopback silence)
+// and never counts toward the pass total — same artifact at boot and at wake.
+static int run_readback_cycles(void) {
+  int pass_count = 0;
+  for (int cycle = 0; cycle < NUM_READBACK_CYCLES; cycle++) {
+
+    // Wait for RX buffer full (rx_sample_count reaches 1024)
+    int rx_ok = 0;
+    for (int i = 0; i < POLL_TIMEOUT; i++) {
+      if (BRIDGE_REG(BRIDGE_REG_RX_COUNT) >= BRIDGE_SAMPLE_DEPTH) {
+        rx_ok = 1;
+        break;
+      }
+    }
+    if (!rx_ok) continue;  // Timeout — skip this cycle
+
+    int nonzero = readback_rx();
+    if (cycle > 0 && nonzero > 0) pass_count++;
+
+    // Release RX buffer for next capture
+    bridge_rx_read_done();
+  }
+  return pass_count;
+}
+
+
+int main(void) {
+
+  neorv32_rte_setup();
+
+  if (neorv32_uart0_available() == 0) return 1;
+  if (neorv32_gpio_available() == 0) return 1;
+
+  neorv32_uart0_setup(BAUD_RATE, 0);
+
+  // ==================================================================
+  // Configure axi_ad9361 core registers
+  // ==================================================================
+
+  configure_ad9361();
 
   neorv32_gpio_pin_set(GPIO_AD9361_DONE, 1);  // Milestone: core configured
 
@@ -151,11 +221,7 @@ int main(void) {
   // TX: load 1024 samples, enable bridge → SEND → RECEIVE
   // ==================================================================
 
-  volatile uint32_t *tx_buf = (volatile uint32_t *)(AXI_STREAMING_ADAPTER_BASE + BRIDGE_TX_DATA_BASE);
-  for (int i = 0; i < BRIDGE_SAMPLE_DEPTH; i++) {
-    uint32_t sample = ((uint32_t)(i + 0x1000) << 16) | (i & 0xFFFF);
-    tx_buf[i] = sample;
-  }
+  load_tx_buffer();
 
   bridge_enable_and_wait();  // Pulses enable, waits for RECEIVE state
 
@@ -169,42 +235,60 @@ int main(void) {
   // CPU reads the snapshot, pulses rx_read_done to release buffer.
   // ==================================================================
 
-  int pass_count = 0;
-
-  for (int cycle = 0; cycle < NUM_READBACK_CYCLES; cycle++) {
-
-    // Wait for RX buffer full (rx_sample_count reaches 1024)
-    int rx_ok = 0;
-    for (int i = 0; i < POLL_TIMEOUT; i++) {
-      if (BRIDGE_REG(BRIDGE_REG_RX_COUNT) >= BRIDGE_SAMPLE_DEPTH) {
-        rx_ok = 1;
-        break;
-      }
-    }
-    if (!rx_ok) continue;  // Timeout — skip this cycle
-
-    // Cycle 0 is a dummy warm-up cycle.  In loopback mode, the first
-    // 1024 RX samples are captured while the TX burst is still
-    // propagating through the DAC → LVDS → loopback → ADC pipeline,
-    // so they contain pre-loopback silence (zeros).  This is an
-    // artifact of the test topology — in real operation the ADC always
-    // has live antenna data and no warm-up is needed.  We still read
-    // and release the buffer to advance the state machine, but don't
-    // count it toward the pass criteria.
-    int nonzero = readback_rx();
-    if (cycle > 0 && nonzero > 0) pass_count++;
-
-    // Release RX buffer for next capture
-    bridge_rx_read_done();
-  }
+  int pass_count = run_readback_cycles();
 
   neorv32_gpio_pin_set(GPIO_RX_DONE, 1);  // Milestone: RX done
+
+  // ==================================================================
+  // Directed power-gate cycle — the fabric half of the power-down feature
+  //
+  // This sim has no AD9361 / SPI / ENSM model (the testbench is the chip), so
+  // SLEEP is modelled by stopping l_clk.  Two separate levers are driven, in
+  // the same order hardware would, so the wake invariant holds:
+  //   gpio_o[9] (GPIO_LCLK_DEAD_PIN): TB-only "chip clock stopped" — parks
+  //             stim_clk so DATA_CLK / l_clk dies (models ENSM SLEEP / FDD).
+  //   gpio_o[8] (GPIO_PWRDN_PIN):     the real fabric lever — gates the 300 MHz
+  //             IODELAY refclk (BUFGCE) and holds axi_ad9361 + the TX/RX
+  //             datapath in reset.
+  //
+  // Down: stop l_clk FIRST, then engage pwr_dn (stop the clock before gating
+  // the logic it feeds).  Up: bring l_clk back FIRST, while pwr_dn is still 1,
+  // so the armed l_clk-domain reset catches the returning clock and the XPM
+  // synchronizer sees a live destination clock; THEN clear pwr_dn.  Releasing
+  // pwr_dn re-pulses the IP's delay_rst and cold-resets the datapath; the gated
+  // reset wiped the axi_ad9361 registers back to defaults, so we re-configure,
+  // re-prime the TX burst, and re-capture.  PASS requires valid RX again after
+  // the cycle — proving the fabric gating + reset-hold + l_clk stop/restart
+  // recovery.
+  // ==================================================================
+
+  // --- Power down ---
+  neorv32_gpio_pin_set(GPIO_LCLK_DEAD_PIN, 1);  // model SLEEP: TB parks stim_clk -> l_clk dies
+  for (volatile int i = 0; i < LCLK_DEAD_SETTLE_ITERS; i++) {}  // let l_clk stop before gating
+  neorv32_gpio_pin_set(GPIO_PWRDN_PIN, 1);      // fabric: gate clk_out2 + hold resets
+  for (volatile int i = 0; i < PWRDN_HOLD_ITERS; i++) {}        // hold in the low-power state
+
+  // --- Power up ---
+  neorv32_gpio_pin_set(GPIO_LCLK_DEAD_PIN, 0);  // model FDD: TB restarts stim_clk -> l_clk returns
+  for (volatile int i = 0; i < LCLK_DEAD_SETTLE_ITERS; i++) {}  // let l_clk run (reset asserts) while pwr_dn still 1
+  neorv32_gpio_pin_set(GPIO_PWRDN_PIN, 0);      // release fabric AFTER l_clk is back
+  for (volatile int i = 0; i < PWRUP_SETTLE_ITERS; i++) {}      // reset re-sequence
+
+  configure_ad9361();                        // registers were reset to defaults while gated
+  neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 1);
+  neorv32_gpio_pin_set(GPIO_UP_TXNRX_PIN, 1);
+
+  bridge_reset();                            // bridge FSM back to IDLE
+  load_tx_buffer();                          // re-prime the TX burst
+  bridge_enable_and_wait();
+
+  int post_wake_nonzero = run_readback_cycles();
 
   // ==================================================================
   // Signal result via GPIO — testbench auto-terminates on GPIO_RESULT_VALID
   // ==================================================================
 
-  int pass = (pass_count == (NUM_READBACK_CYCLES - 1));
+  int pass = (pass_count == (NUM_READBACK_CYCLES - 1)) && (post_wake_nonzero > 0);
 
   if (pass) {
     neorv32_gpio_pin_set(GPIO_RESULT, 1);

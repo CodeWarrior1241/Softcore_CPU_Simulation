@@ -33,6 +33,14 @@
 //     VHDL origin; sim_netlist includes duplicate glbl module.
 //     Replaced with behavioral reset synchronizer in datapath_top.sv.
 //
+//   power-gating (Tier-1 pwr_dn clock-gate + reset-hold):
+//     The software power-down fabric path -- NEORV32 gpio_o[8] (pwr_dn) ->
+//     clk_out2 BUFGCE gate + axi_ad9361 s_axi_aresetn reset-hold + xpm_cdc
+//     l_clk-domain reset -- is intentionally NOT modeled here. None of the
+//     cells it acts on exist in this datapath-only sim: no CPU to source
+//     pwr_dn, no axi_ad9361 / IDELAY / clk_out2 to gate, behavioral clk_wiz
+//     (no BUFGCE) and behavioral resets (no proc_sys_reset).
+//
 //------------------------------------------------------------------------------
 // What IS simulated
 //------------------------------------------------------------------------------

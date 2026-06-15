@@ -29,7 +29,9 @@ variable top_level_bd_name "Top"
 
 # NEORV32 CPU and infrastructure
 variable neorv32_cpu "NEORV32_RISC_V"
-variable ecs_clock_300_mhz "ECS_Clock_300MHz"
+# Name parity with axau15 build_all.tcl so all BD cells line up 1:1.
+# The sim input clock is still a 300 MHz source (PRIM_IN_FREQ/period unchanged below).
+variable sitime_300_mhz "SiTime_300MHz"
 variable cpu_sys_reset "CPU_Reset"
 variable neorv32_cpu_input_reset "NEORV32_CPU_Input_Reset_Inv"
 variable axi_cpu_interconnect "AXI_CPU_Interconnect"
@@ -110,7 +112,7 @@ proc check_board_files {} {
 proc build_all {} {
     # Import global variables
     global project_name part project_dir top_level_bd_name
-    global neorv32_cpu ecs_clock_300_mhz cpu_sys_reset neorv32_cpu_input_reset axi_cpu_interconnect
+    global neorv32_cpu sitime_300_mhz cpu_sys_reset neorv32_cpu_input_reset axi_cpu_interconnect
     global axi_bram_controller qpsk_snapshot_bram
     global axi_ad9361 axi_ad9361_adapter
     global axi_streaming_adapter
@@ -392,7 +394,7 @@ set_property -dict [list \
     CONFIG.IO_UART0_TX_FIFO {32} \
     CONFIG.IO_GPIO_EN {true} \
     CONFIG.IO_GPIO_IN_NUM {8} \
-    CONFIG.IO_GPIO_OUT_NUM {8} \
+    CONFIG.IO_GPIO_OUT_NUM {16} \
     CONFIG.IO_SPI_EN {true} \
     CONFIG.IO_SPI_FIFO {4} \
     CONFIG.XBUS_EN {true} \
@@ -406,13 +408,13 @@ set_property -dict [list \
 puts "INFO: NEORV32 configured (RV32IMC, 32KB IMEM, 16KB DMEM, TRACER enabled)"
 
 # Add board clock input and MMCM
-create_bd_cell -type ip -vlnv xilinx.com:ip:clk_wiz:6.0 $ecs_clock_300_mhz
+create_bd_cell -type ip -vlnv xilinx.com:ip:clk_wiz:6.0 $sitime_300_mhz
 set_property -dict [list \
     CONFIG.AUTO_PRIMITIVE {PLL} \
     CONFIG.CLKOUT1_REQUESTED_OUT_FREQ {150.000} \
     CONFIG.CLKOUT2_REQUESTED_OUT_FREQ {300.000} \
     CONFIG.CLKOUT2_USED {true} \
-    CONFIG.CLKOUT2_DRIVES {Buffer} \
+    CONFIG.CLKOUT2_DRIVES {BUFGCE} \
     CONFIG.CLKOUT3_DRIVES {Buffer} \
     CONFIG.CLKOUT4_DRIVES {Buffer} \
     CONFIG.CLKOUT5_DRIVES {Buffer} \
@@ -429,24 +431,24 @@ set_property -dict [list \
     CONFIG.RESET_TYPE {ACTIVE_LOW} \
     CONFIG.USE_LOCKED {false} \
     CONFIG.USE_RESET {true} \
-] [get_bd_cells $ecs_clock_300_mhz]
+] [get_bd_cells $sitime_300_mhz]
 
 # Configure ECS 300MHz input board clock I/O
 startgroup
-    make_bd_intf_pins_external  [get_bd_intf_pins $ecs_clock_300_mhz/CLK_IN1_D]
+    make_bd_intf_pins_external  [get_bd_intf_pins $sitime_300_mhz/CLK_IN1_D]
     set_property name ecs_clk_in [get_bd_intf_ports CLK_IN1_D_0]
     set_property CONFIG.FREQ_HZ 300000000 [get_bd_intf_ports /ecs_clk_in]
-    make_bd_pins_external  [get_bd_pins $ecs_clock_300_mhz/resetn]
+    make_bd_pins_external  [get_bd_pins $sitime_300_mhz/resetn]
     set_property name system_resetn [get_bd_ports resetn_0]
     set_property -dict [list \
     CONFIG.CLKIN1_JITTER_PS {33.330000000000005} \
     CONFIG.MMCM_CLKIN1_PERIOD {3.333} \
     CONFIG.PRIM_IN_FREQ {300.000} \
     CONFIG.USE_LOCKED {true} \
-    ] [get_bd_cells $ecs_clock_300_mhz]
-    make_bd_pins_external  [get_bd_pins $ecs_clock_300_mhz/locked]
+    ] [get_bd_cells $sitime_300_mhz]
+    make_bd_pins_external  [get_bd_pins $sitime_300_mhz/locked]
     set_property name sim_clock_150MHz_locked [get_bd_ports locked_0]
-    make_bd_pins_external  [get_bd_pins $ecs_clock_300_mhz/clk_out1]
+    make_bd_pins_external  [get_bd_pins $sitime_300_mhz/clk_out1]
     set_property name sim_clock_150MHz [get_bd_ports clk_out1_0]
 endgroup
 
@@ -459,6 +461,39 @@ set_property -dict [list \
     CONFIG.C_OPERATION {not} \
     CONFIG.C_SIZE {1} \
 ] [get_bd_cells $neorv32_cpu_input_reset]
+
+###############################################################################
+# Power-Down Control (Tier 1) -- pwr_dn = gpio_o[8]
+#
+# Mirror of the axau15 build (identical cell VLNVs/configs). This sim verifies
+# the FABRIC half of the feature: the clk_out2 gate, the reset-holds, and the
+# l_clk stop->restart recovery. Derived nets:
+#   pwr_dn_inv (NOT)          -> SiTime_300MHz/clk_out2_ce : stop the 300 MHz
+#                                IODELAY refclk via BUFGCE
+#   pwr_dn_aresetn_gate (AND) -> axi_ad9361 s_axi_aresetn + TX CDC FIFO
+#                                s_axis_aresetn : reset-hold (active-low)
+#   xpm_cdc_single (created later) -> util_ad9361_lclk_reset/aux_reset_in
+###############################################################################
+
+# pwr_dn: slice bit 8 out of the now-16-bit gpio_o bus.
+create_bd_cell -type ip -vlnv xilinx.com:ip:xlslice:1.0 gpio_pwr_dn_slice
+set_property -dict [list CONFIG.DIN_WIDTH {16} CONFIG.DIN_FROM {8} CONFIG.DIN_TO {8}] [get_bd_cells gpio_pwr_dn_slice]
+connect_bd_net [get_bd_pins $neorv32_cpu/gpio_o] [get_bd_pins gpio_pwr_dn_slice/Din]
+
+# pwr_dn_n = NOT pwr_dn (clock-enable / active-low-reset sense)
+create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 pwr_dn_inv
+set_property -dict [list CONFIG.C_OPERATION {not} CONFIG.C_SIZE {1}] [get_bd_cells pwr_dn_inv]
+connect_bd_net [get_bd_pins gpio_pwr_dn_slice/Dout] [get_bd_pins pwr_dn_inv/Op1]
+
+# aresetn_gated = peripheral_aresetn AND pwr_dn_n (active-low, 150 MHz domain)
+create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 pwr_dn_aresetn_gate
+set_property -dict [list CONFIG.C_OPERATION {and} CONFIG.C_SIZE {1}] [get_bd_cells pwr_dn_aresetn_gate]
+connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins pwr_dn_aresetn_gate/Op1]
+connect_bd_net [get_bd_pins pwr_dn_inv/Res] [get_bd_pins pwr_dn_aresetn_gate/Op2]
+
+# Gate the 300 MHz IODELAY refclk. CLKOUT2_DRIVES={BUFGCE} (set in the clk_wiz
+# config above) exposes clk_out2_ce; CE = pwr_dn_n (clock runs while powered up).
+connect_bd_net [get_bd_pins pwr_dn_inv/Res] [get_bd_pins $sitime_300_mhz/clk_out2_ce]
 
 # Create the external UART signals
 startgroup
@@ -629,22 +664,26 @@ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 tdd_sync_const
 set_property -dict [list CONFIG.CONST_VAL {0} CONFIG.CONST_WIDTH {1}] [get_bd_cells tdd_sync_const]
 connect_bd_net [get_bd_pins tdd_sync_const/dout] [get_bd_pins $axi_ad9361/tdd_sync]
 
-connect_bd_net [get_bd_pins $axi_ad9361/delay_clk] [get_bd_pins $ecs_clock_300_mhz/clk_out2]
+connect_bd_net [get_bd_pins $axi_ad9361/delay_clk] [get_bd_pins $sitime_300_mhz/clk_out2]
 
 # Connect l_clk to itself (AD9361 uses recovered clock internally)
 connect_bd_net [get_bd_pins $axi_ad9361/l_clk] [get_bd_pins $axi_ad9361/clk]
 
 # Connect AXI clock and reset
-connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1] [get_bd_pins $axi_ad9361/s_axi_aclk]
-connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins $axi_ad9361/s_axi_aresetn]
+# axi_ad9361 register/up domain is held in reset while pwr_dn=1 (gated aresetn
+# = peripheral_aresetn AND NOT pwr_dn). Releasing it re-fires the IP-internal
+# delay_rst, which is the UltraScale+ IDELAYCTRL reset required after the
+# 300 MHz refclk is interrupted by the BUFGCE gate.
+connect_bd_net [get_bd_pins $sitime_300_mhz/clk_out1] [get_bd_pins $axi_ad9361/s_axi_aclk]
+connect_bd_net [get_bd_pins pwr_dn_aresetn_gate/Res] [get_bd_pins $axi_ad9361/s_axi_aresetn]
 
 # Connect up_enable and up_txnrx from NEORV32 GPIO
 # GPIO[0] = up_enable, GPIO[1] = up_txnrx
 # Create slice for GPIO bits
 create_bd_cell -type ip -vlnv xilinx.com:ip:xlslice:1.0 gpio_up_enable_slice
-set_property -dict [list CONFIG.DIN_WIDTH {8} CONFIG.DIN_FROM {0} CONFIG.DIN_TO {0}] [get_bd_cells gpio_up_enable_slice]
+set_property -dict [list CONFIG.DIN_WIDTH {16} CONFIG.DIN_FROM {0} CONFIG.DIN_TO {0}] [get_bd_cells gpio_up_enable_slice]
 create_bd_cell -type ip -vlnv xilinx.com:ip:xlslice:1.0 gpio_up_txnrx_slice
-set_property -dict [list CONFIG.DIN_WIDTH {8} CONFIG.DIN_FROM {1} CONFIG.DIN_TO {1}] [get_bd_cells gpio_up_txnrx_slice]
+set_property -dict [list CONFIG.DIN_WIDTH {16} CONFIG.DIN_FROM {1} CONFIG.DIN_TO {1}] [get_bd_cells gpio_up_txnrx_slice]
 
 connect_bd_net [get_bd_pins $neorv32_cpu/gpio_o] [get_bd_pins gpio_up_enable_slice/Din]
 connect_bd_net [get_bd_pins $neorv32_cpu/gpio_o] [get_bd_pins gpio_up_txnrx_slice/Din]
@@ -661,6 +700,31 @@ puts "INFO: Creating l_clk domain reset synchronizer..."
 create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 $util_ad9361_lclk_reset
 connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins $util_ad9361_lclk_reset/ext_reset_in]
 connect_bd_net [get_bd_pins $axi_ad9361/l_clk] [get_bd_pins $util_ad9361_lclk_reset/slowest_sync_clk]
+
+# Hold the l_clk-domain reset (HLS adapter ap_rst_n + RX CDC FIFO s_axis_aresetn,
+# both already driven by this proc_sys_reset) during power-down via an
+# active-high aux reset. pwr_dn lives in the clk_out1 (150 MHz) domain while
+# aux_reset_in is sampled in the l_clk domain -- the one new project-authored
+# CDC. Carry it through a self-constrained xpm_cdc_single so the crossing brings
+# its own macro-scoped false-path and no top-level XDC is needed. With l_clk
+# stopped the armed reset cannot propagate; when l_clk returns (firmware clears
+# pwr_dn only after the clock is back) the adapter + RX FIFO restart from a clean
+# reset instead of resuming a frozen mid-burst state.
+set_property -dict [list CONFIG.C_AUX_RESET_HIGH {1}] [get_bd_cells $util_ad9361_lclk_reset]
+create_bd_cell -type ip -vlnv xilinx.com:ip:xpm_cdc_gen:1.0 pwr_dn_lclk_sync
+set_property -dict [list \
+    CONFIG.CDC_TYPE {xpm_cdc_single} \
+    CONFIG.WIDTH {1} \
+    CONFIG.DEST_SYNC_FF {4} \
+    CONFIG.SRC_INPUT_REG {false} \
+] [get_bd_cells pwr_dn_lclk_sync]
+connect_bd_net [get_bd_pins gpio_pwr_dn_slice/Dout] [get_bd_pins pwr_dn_lclk_sync/src_in]
+# src_clk: the source (gpio_o flop) is in the clk_out1 (150 MHz) domain.
+# xpm_cdc_single keeps a src_clk pin even with SRC_INPUT_REG=false; BD
+# validation requires it driven by a real clock.
+connect_bd_net [get_bd_pins $sitime_300_mhz/clk_out1] [get_bd_pins pwr_dn_lclk_sync/src_clk]
+connect_bd_net [get_bd_pins $axi_ad9361/l_clk]      [get_bd_pins pwr_dn_lclk_sync/dest_clk]
+connect_bd_net [get_bd_pins pwr_dn_lclk_sync/dest_out] [get_bd_pins $util_ad9361_lclk_reset/aux_reset_in]
 
 ###############################################################################
 # AXI AD9361 Adapter (HLS IP)
@@ -740,7 +804,7 @@ puts "INFO: Instantiating AXI-Lite to Streaming Adapter..."
 create_bd_cell -type ip -vlnv user:hls:axi_lite_to_streaming_adapter:1.0 $axi_streaming_adapter
 
 # Connect adapter clock and reset (150 MHz AXI domain)
-connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1] [get_bd_pins $axi_streaming_adapter/ap_clk]
+connect_bd_net [get_bd_pins $sitime_300_mhz/clk_out1] [get_bd_pins $axi_streaming_adapter/ap_clk]
 connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins $axi_streaming_adapter/ap_rst_n]
 
 ###############################################################################
@@ -761,8 +825,11 @@ set_property -dict [list \
 ] [get_bd_cells $ad9361_cdc_tx_streaming_fifo]
 
 # TX FIFO clocks and resets
-connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1]             [get_bd_pins $ad9361_cdc_tx_streaming_fifo/s_axis_aclk]
-connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn]        [get_bd_pins $ad9361_cdc_tx_streaming_fifo/s_axis_aresetn]
+# s_axis_aresetn uses the gated aresetn (its only reset port; the IP
+# synchronizes it into both clock domains internally), so the TX CDC FIFO is
+# held flushed across the power-down window.
+connect_bd_net [get_bd_pins $sitime_300_mhz/clk_out1]             [get_bd_pins $ad9361_cdc_tx_streaming_fifo/s_axis_aclk]
+connect_bd_net [get_bd_pins pwr_dn_aresetn_gate/Res]                  [get_bd_pins $ad9361_cdc_tx_streaming_fifo/s_axis_aresetn]
 connect_bd_net [get_bd_pins $axi_ad9361/l_clk]                       [get_bd_pins $ad9361_cdc_tx_streaming_fifo/m_axis_aclk]
 
 # TX FIFO data path: streaming adapter -> FIFO -> ad9361_adapter
@@ -781,7 +848,7 @@ set_property -dict [list \
 # RX FIFO clocks and resets
 connect_bd_net [get_bd_pins $axi_ad9361/l_clk]                       [get_bd_pins $ad9361_cdc_rx_streaming_fifo/s_axis_aclk]
 connect_bd_net [get_bd_pins $util_ad9361_lclk_reset/peripheral_aresetn] [get_bd_pins $ad9361_cdc_rx_streaming_fifo/s_axis_aresetn]
-connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1]             [get_bd_pins $ad9361_cdc_rx_streaming_fifo/m_axis_aclk]
+connect_bd_net [get_bd_pins $sitime_300_mhz/clk_out1]             [get_bd_pins $ad9361_cdc_rx_streaming_fifo/m_axis_aclk]
 
 # RX FIFO data path: ad9361_adapter -> FIFO -> streaming adapter
 connect_bd_intf_net [get_bd_intf_pins $axi_ad9361_adapter/rx_stream]          [get_bd_intf_pins $ad9361_cdc_rx_streaming_fifo/S_AXIS]
@@ -795,14 +862,14 @@ puts "INFO: Connecting clocks, resets, and AXI interfaces..."
 
 # Connect critical async resets and clocks for both reset blocks
 connect_bd_net [get_bd_ports system_resetn] [get_bd_pins $cpu_sys_reset/ext_reset_in]
-connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1] [get_bd_pins $cpu_sys_reset/slowest_sync_clk]
-connect_bd_net [get_bd_pins $ecs_clock_300_mhz/clk_out1] [get_bd_pins $neorv32_cpu/clk]
+connect_bd_net [get_bd_pins $sitime_300_mhz/clk_out1] [get_bd_pins $cpu_sys_reset/slowest_sync_clk]
+connect_bd_net [get_bd_pins $sitime_300_mhz/clk_out1] [get_bd_pins $neorv32_cpu/clk]
 connect_bd_net [get_bd_pins $cpu_sys_reset/mb_reset] [get_bd_pins $neorv32_cpu_input_reset/Op1]
 connect_bd_net [get_bd_pins $neorv32_cpu_input_reset/Res] [get_bd_pins $neorv32_cpu/resetn]
-connect_bd_net [get_bd_pins $axi_cpu_interconnect/aclk] [get_bd_pins $ecs_clock_300_mhz/clk_out1]
+connect_bd_net [get_bd_pins $axi_cpu_interconnect/aclk] [get_bd_pins $sitime_300_mhz/clk_out1]
 connect_bd_net [get_bd_pins $axi_cpu_interconnect/aresetn] [get_bd_pins $cpu_sys_reset/peripheral_aresetn]
 connect_bd_net [get_bd_pins $axi_bram_controller/s_axi_aresetn] [get_bd_pins $cpu_sys_reset/peripheral_aresetn]
-connect_bd_net [get_bd_pins $axi_bram_controller/s_axi_aclk] [get_bd_pins $ecs_clock_300_mhz/clk_out1]
+connect_bd_net [get_bd_pins $axi_bram_controller/s_axi_aclk] [get_bd_pins $sitime_300_mhz/clk_out1]
 
 # Connect internal AXI signals and BRAM memory signals
 connect_bd_intf_net [get_bd_intf_pins $neorv32_cpu/m_axi] [get_bd_intf_pins $axi_cpu_interconnect/S00_AXI]
@@ -859,7 +926,7 @@ generate_target all [get_files $bd_file]
 
 # Export IP cache for all blocks
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${neorv32_cpu}_0] }
-catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${ecs_clock_300_mhz}_0] }
+catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${sitime_300_mhz}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${cpu_sys_reset}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${neorv32_cpu_input_reset}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_cpu_interconnect}_0] }
@@ -871,12 +938,18 @@ catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${axi_streami
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${ad9361_cdc_tx_streaming_fifo}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${ad9361_cdc_rx_streaming_fifo}_0] }
 catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_${util_ad9361_lclk_reset}_0] }
+# Power-down control cells that generate their own OOC IP (util_vector_logic +
+# xpm_cdc_gen). The xlslice gpio_pwr_dn_slice is inlined like the other slices,
+# so it has no separate run.
+catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_pwr_dn_inv_0] }
+catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_pwr_dn_aresetn_gate_0] }
+catch { config_ip_cache -export [get_ips -all ${top_level_bd_name}_pwr_dn_lclk_sync_0] }
 
 export_ip_user_files -of_objects [get_files $bd_file] -no_script -sync -force -quiet
 create_ip_run [get_files -of_objects [get_fileset sources_1] $bd_file]
 set ip_synth_runs [list \
     ${top_level_bd_name}_${neorv32_cpu}_0_synth_1 \
-    ${top_level_bd_name}_${ecs_clock_300_mhz}_0_synth_1 \
+    ${top_level_bd_name}_${sitime_300_mhz}_0_synth_1 \
     ${top_level_bd_name}_${cpu_sys_reset}_0_synth_1 \
     ${top_level_bd_name}_${neorv32_cpu_input_reset}_0_synth_1 \
     ${top_level_bd_name}_${axi_cpu_interconnect}_0_synth_1 \
@@ -888,6 +961,9 @@ set ip_synth_runs [list \
     ${top_level_bd_name}_${ad9361_cdc_tx_streaming_fifo}_0_synth_1 \
     ${top_level_bd_name}_${ad9361_cdc_rx_streaming_fifo}_0_synth_1 \
     ${top_level_bd_name}_${util_ad9361_lclk_reset}_0_synth_1 \
+    ${top_level_bd_name}_pwr_dn_inv_0_synth_1 \
+    ${top_level_bd_name}_pwr_dn_aresetn_gate_0_synth_1 \
+    ${top_level_bd_name}_pwr_dn_lclk_sync_0_synth_1 \
 ]
 launch_runs {*}$ip_synth_runs -jobs 16
 wait_on_runs {*}$ip_synth_runs

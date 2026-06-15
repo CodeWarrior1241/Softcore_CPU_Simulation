@@ -85,6 +85,7 @@ vopt -l elaborate.log $acc_flag -suppress 10016 \
     -L xil_defaultlib \
     -L xilinx_vip \
     -L xpm \
+    -L xpm_cdc_gen_v1_0_5 \
     -Lf neorv32 \
     -L proc_sys_reset_v5_0_17 \
     -L util_vector_logic_v2_0_5 \
@@ -164,8 +165,8 @@ catch {
 
 add wave -divider "UUT Internal - Clock Wizard"
 catch {
-    add wave -hex /vivado_tb/dut/Top_i/ECS_Clock_300MHz/clk_out1
-    add wave -hex /vivado_tb/dut/Top_i/ECS_Clock_300MHz/locked
+    add wave -hex /vivado_tb/dut/Top_i/SiTime_300MHz/clk_out1
+    add wave -hex /vivado_tb/dut/Top_i/SiTime_300MHz/locked
 }
 
 add wave -divider "UUT Internal - NEORV32 CPU"

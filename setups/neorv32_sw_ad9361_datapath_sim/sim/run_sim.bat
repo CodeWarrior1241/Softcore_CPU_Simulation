@@ -28,7 +28,9 @@ setlocal enabledelayedexpansion
 REM Configuration
 set VSIM="C:\Program Files\Mentor_Graphics\Questa_Prime_2025.1\win64\vsim.exe"
 set SIM_MODE=gui
-set SIM_TIME=5ms
+REM 15ms: the directed power-gate cycle pushes the GPIO auto-terminate past the
+REM old 5ms default; the TB still $finishes early on PASS/FAIL (upper bound only).
+set SIM_TIME=15ms
 set DETAILED=no
 
 REM Change to script directory

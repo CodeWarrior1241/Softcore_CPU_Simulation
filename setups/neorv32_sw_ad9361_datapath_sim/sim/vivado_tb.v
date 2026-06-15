@@ -331,6 +331,20 @@ module vivado_tb;
 
         // Loop through COE data continuously
         forever begin
+            // SLEEP model: gpio_o[9] is the firmware's TB-only "chip clock
+            // stopped" lever.  On real hardware ENSM SLEEP stops the AD9361
+            // BBPLL, which stops DATA_CLK and so kills l_clk.  There is no
+            // AD9361 model here, so we emulate it: park stim_clk (= rx_clk_in =
+            // DATA_CLK) low and block until the firmware brings the clock back.
+            // This is deliberately a SEPARATE bit from pwr_dn (gpio_o[8]): the
+            // firmware restarts l_clk (clears [9]) BEFORE it clears pwr_dn, so
+            // the wake order matches hardware (the l_clk-domain reset + XPM
+            // synchronizer release into a live, not dead, destination clock).
+            if (dut.Top_i.NEORV32_RISC_V.gpio_o[9]) begin
+                stim_clk = 1'b0;
+                wait (!dut.Top_i.NEORV32_RISC_V.gpio_o[9]);
+            end
+
             // Load next sample from COE data
             current_i = coe_data[coe_index][15:0];
             current_q = coe_data[coe_index][31:16];
@@ -409,7 +423,11 @@ module vivado_tb;
         end
     end
 
-    // l_clk death detector
+    // l_clk death detector.  NOTE: this WARNING is EXPECTED (not a failure)
+    // during the directed power-gate window, when the firmware asserts pwr_dn
+    // and the testbench parks stim_clk so l_clk stops.  It indicates the gate
+    // is working; a clean "l_clk recovered" must NOT re-print (the recovery
+    // monitor latches first_lclk_seen) but edges resume after pwr_dn clears.
     reg [31:0] lclk_last_count;
     initial lclk_last_count = 0;
     always begin
@@ -518,13 +536,16 @@ module vivado_tb;
         $display("==============================================");
 
         // Wait for simulation to complete or timeout
-        // Normal completion via GPIO auto-terminate (~2.8ms post-reset).
-        // This timeout is a safety net only.
-        #5_000_000;  // 5ms timeout
+        // Normal completion via GPIO auto-terminate.  Baseline run finishes
+        // ~2.8ms post-reset; the added directed power-gate cycle (l_clk stop +
+        // restart, re-config, re-prime, re-readback) pushes that out by a few
+        // ms.  This timeout is a safety net only — bumped to 15ms to clear the
+        // longer run.
+        #15_000_000;  // 15ms timeout
 
         $display("");
         $display("==============================================");
-        $display("  Simulation timeout reached (5ms)");
+        $display("  Simulation timeout reached (15ms)");
         $display("  Total samples sent: %0d", samples_sent);
         $display("  WARNING: CPU did not signal PASS/FAIL via GPIO");
         $display("==============================================");

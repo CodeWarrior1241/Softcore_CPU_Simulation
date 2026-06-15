@@ -28,7 +28,10 @@ set -e
 # Configuration
 VSIM="${VSIM:-vsim}"
 SIM_MODE="gui"
-SIM_TIME="5ms"
+# 15ms: the directed power-gate cycle (l_clk stop/restart + re-config + re-prime
+# + re-readback) pushes the GPIO auto-terminate out past the old 5ms default.
+# The TB still $finishes early on PASS/FAIL, so this is just an upper bound.
+SIM_TIME="15ms"
 DETAILED="no"
 
 # Change to script directory
