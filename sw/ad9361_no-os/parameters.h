@@ -12,6 +12,7 @@
 #define GPIO_SYNC_PIN       3       /* gpio_o[3] = gpio_sync */
 #define GPIO_EN_AGC_PIN     4       /* gpio_o[4] = gpio_en_agc */
 #define GPIO_CTL0_PIN       5       /* gpio_o[5] = gpio_ctl[0] */
+#define GPIO_PWRDN_PIN      8       /* gpio_o[8] = software power-down (Tier 1) */
 
 /* AXI peripheral base addresses (from build_all.tcl) */
 #define AXI_AD9361_BASE         0x44A00000UL

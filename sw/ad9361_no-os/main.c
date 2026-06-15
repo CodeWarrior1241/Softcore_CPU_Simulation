@@ -40,6 +40,10 @@
 #define CMD_SET_TX_ATTEN    "set_tx_atten"   /* + integer mdB  (R4 sweep) */
 #define CMD_SET_RX_GAIN     "set_rx_gain"    /* + integer dB   (R4 sweep) */
 #define CMD_GET_RSSI        "get_rssi"       /* compact RSSI + gain line */
+#define CMD_POWER_DOWN      "power_down"     /* Tier-1 deep low-power: ENSM SLEEP + gating */
+#define CMD_POWER_UP        "power_up"       /* wake + re-init datapath */
+#define CMD_POWER_DOWN_T0   "power_down_t0"  /* bench twin of power_down (Tier-0); see handler */
+#define CMD_POWER_UP_T0     "power_up_t0"    /* bench twin of power_up + verbose capture probe */
 
 /* Response strings */
 #define RESP_RF_ENABLED     "rf_enabled\n"
@@ -80,6 +84,7 @@
 #define CLK_MON_WINDOW              65536UL
 
 static int rf_enabled = 0;
+static int power_state = 1;      /* 1 = up, 0 = powered down (Tier 1 low-power) */
 
 /*
  * Read a LF/CR-terminated command line from UART (blocking).
@@ -171,10 +176,11 @@ static const char *ensm_mode_str[] = {
 
 /* axi_ad9361 IP: 4 ADC channels (I0,Q0,I1,Q1) and 4 DAC channels in 2R2T mode.
  * Required by ad9361_init() now that AXI_ADC_NOT_PRESENT is no longer defined,
- * so the real ad9361_dig_tune() (when enabled) can drive the IP via these
- * descriptors. We currently skip dig_tune (digital_interface_tune_skip_mode=2)
- * because every tap fails — wanting the diagnostic dump to surface why before
- * trying further IDELAY tuning. */
+ * so the real ad9361_dig_tune() can drive the IP via these descriptors.
+ * ad9361_init() itself skips dig_tune (digital_interface_tune_skip_mode=2); an
+ * explicit RX dig_tune is run post-init (step 6.7) — it passes on the axau15
+ * and yields the working RX capture. The diagnostic dumps below are retained
+ * for future LVDS-capture debugging. */
 struct axi_adc_init rx_adc_init = {
 	.name         = "rx_adc",
 	.base         = AXI_AD9361_BASE,        /* shared with axi_ad9361 IP */
@@ -960,12 +966,11 @@ AD9361_InitParam default_init_param = {
 	0,		// elna_rx2_gpo1_control_enable
 	0,		// elna_gaintable_all_index_enable
 	/* Digital Interface Control */
-	2,		// digital_interface_tune_skip_mode  (skip again -- dig_tune
-				// still failed with ADC_INIT_DELAY=0, so the IDELAY-pre-
-				// shift hypothesis was also wrong. Skip dig_tune so init
-				// completes; we run diag_dig_tune_one_step() manually
-				// after init to instrument what dig_tune's check_pn is
-				// actually seeing (link_ok dropping vs PN errors latched).)
+	2,		// digital_interface_tune_skip_mode  (init skips dig_tune; an
+				// explicit RX dig_tune runs post-init (step 6.7) and on
+				// power_up, and passes on the axau15. diag_dig_tune_one_step()
+				// remains available after init to instrument check_pn
+				// (link_ok vs PN errors) if LVDS capture ever needs debugging.)
 	0,		// digital_interface_tune_fir_disable
 	1,		// pp_tx_swap_enable
 	1,		// pp_rx_swap_enable
@@ -1216,13 +1221,19 @@ int main(void)
 	 * HAVE_VERBOSE_MESSAGES is defined in app_config.h.
 	 *
 	 * max_freq=0 -> sweep at current rate only (don't try 25/40/61.44 MHz).
-	 * BE_MOREVERBOSE -> always print the field grid (pass or fail).
+	 * BE_MOREVERBOSE would print the 2x16 field grid, but that grid goes out
+	 * via printk, which is silenced in this build (HAVE_DEBUG_MESSAGES off, to
+	 * quiet boot spew). So the pass indicator is the RETURN CODE, not a grid.
 	 *
-	 * Expected current state: full grid all '#' (dig_tune has been
-	 * reproducibly all-fail). The grid output combined with the
-	 * data_sampler results above should determine whether the failure
-	 * mode is "no real data reaches IP" or "data reaches IP but doesn't
-	 * decode as PN".
+	 * Verified PASS on the axau15 (boot spew): "ad9361_dig_tune returned 0".
+	 * Corroborated in the same boot log by the diagnostics above/below:
+	 *   - PHASE 2 (BIST PRBS_INJ_RX): pn_oos=0, 0/200 re-sets -> PN checker
+	 *     locks to the injected PRBS (the mechanism dig_tune depends on);
+	 *   - adc_status: "sw_taps_per_ui=4.89 (>3 = healthy)" -> IDELAYCTRL
+	 *     locked, RX eye well-resolved;
+	 *   - l_clk_hz ~= 61.44 MHz, bbpll_lock=1, rx_vco_lock=1, link_ok=1.
+	 * This establishes the working RX IDELAY taps. The diag dumps stay on so
+	 * any future LVDS-capture regression is visible in the boot log.
 	 */
 	uint8_t saved_skipmode = phy->pdata->dig_interface_tune_skipmode;
 	phy->pdata->dig_interface_tune_skipmode = 1;  /* RX only, no TX */
@@ -1329,6 +1340,7 @@ int main(void)
 			neorv32_uart0_puts(RESP_RF_DISABLED);
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_ENABLE_SNAPSHOT)) {
+			if (!power_state) { neorv32_uart0_puts("powered_down\n"); continue; }
 			/* Wait for RX buffer to fill (1024 samples from ADC auto-drain) */
 			if (!bridge_wait_rx_full()) {
 				neorv32_uart0_puts("snapshot_timeout\n");
@@ -1345,9 +1357,10 @@ int main(void)
 			uint32_t tx_count = BRIDGE_REG(BRIDGE_REG_STATUS_TX_COUNT);
 			uint32_t rx_count = BRIDGE_REG(BRIDGE_REG_STATUS_RX_COUNT);
 			uint32_t gpio_status = neorv32_gpio_port_get() & 0xFF;
-			neorv32_uart0_printf("ENSM:%s RF:%s LB:%d STATE:%u TX_CNT:%u RX_CNT:%u GPIO:0x%x\n",
+			neorv32_uart0_printf("ENSM:%s RF:%s PWR:%s LB:%d STATE:%u TX_CNT:%u RX_CNT:%u GPIO:0x%x\n",
 					     (ensm_mode < 8) ? ensm_mode_str[ensm_mode] : "?",
 					     rf_enabled ? "ON" : "OFF",
+					     power_state ? "UP" : "DOWN",
 					     (int)phy->bist_loopback_mode,
 					     (unsigned)bridge_state,
 					     (unsigned)tx_count,
@@ -1355,12 +1368,15 @@ int main(void)
 					     (unsigned)gpio_status);
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_GET_ADC_STATUS)) {
+			if (!power_state) { neorv32_uart0_puts("powered_down\n"); continue; }
 			dump_adc_status();
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_GET_DAC_STATUS)) {
+			if (!power_state) { neorv32_uart0_puts("powered_down\n"); continue; }
 			dump_dac_status();
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_GET_VALID_RATE)) {
+			if (!power_state) { neorv32_uart0_puts("powered_down\n"); continue; }
 			diag_get_valid_rate();
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_GET_CHIP_STATUS)) {
@@ -1381,6 +1397,7 @@ int main(void)
 			neorv32_uart0_printf("bist_stopped ret=%d\n", (int)r);
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_PINCTL_RX)) {
+			if (!power_state) { neorv32_uart0_puts("powered_down\n"); continue; }
 			/* Experiment: hand RX/TX gating to the chip's ENABLE/TXNRX *pins*
 			 * (level mode) and assert them, in case the data port only streams
 			 * when ENABLE is physically high (vs SPI-only ENSM=FDD). The reg
@@ -1448,6 +1465,166 @@ int main(void)
 			ad9361_get_rx_rf_gain(phy, 0, &g);
 			neorv32_uart0_printf("rssi symbol=%u gain=%d ret=%d\n",
 					     (unsigned)rssi.symbol, (int)g, (int)r);
+
+		} else if (strcmp_cmd(cmd_buffer, CMD_POWER_DOWN)) {
+			/* Tier-0 deep low-power: chip ENSM SLEEP only (the dominant Watts:
+			 * RF synths, mixers, ADC/DAC, BB filters), which also stops the
+			 * BBPLL -> DATA_CLK -> l_clk, so the whole l_clk fabric domain
+			 * quiesces for free. The fabric pwr_dn gate (Tier-1: clk_out2 +
+			 * s_axi_aresetn reset-hold) is DELIBERATELY NOT used: on this
+			 * bitstream the gate cycle corrupts the axi_ad9361 IDELAY/dev_if so
+			 * that no IDELAY tap recovers on wake (dig_tune all-'#'). Verified by
+			 * the Tier-0 knockout (power_down_t0/up_t0): with pwr_dn left low the
+			 * RX capture recovers fully (PHASE 2 pn_oos->0, dig_tune passes).
+			 * Re-enabling Tier-1 requires an FPGA fix to the IDELAYCTRL recovery
+			 * (separate clk-restart from reset-release) -- future work. */
+			if (!power_state) { neorv32_uart0_puts("already_down\n"); continue; }
+			/* 1. HLS bridge -> IDLE while l_clk still runs. */
+			bridge_reset();
+			/* 2. Drop datapath enables into axi_ad9361 (same as disable_rf). */
+			neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 0);
+			neorv32_gpio_pin_set(GPIO_UP_TXNRX_PIN, 0);
+			rf_enabled = 0;
+			/* 3. Graceful chip descent: ALERT (TX/RX off, still clocked). */
+			ad9361_set_en_state_machine_mode(phy, ENSM_MODE_ALERT);
+			/* 4. Kill both RF synthesizers -- the largest power lever. */
+			ad9361_rx_lo_powerdown(phy, 1);
+			ad9361_tx_lo_powerdown(phy, 1);
+			/* 5. Deep SLEEP: BBPLL stops -> DATA_CLK stops -> l_clk dies, so
+			 *    axi_ad9361 dev_if + HLS adapter + FIFO l_clk sides quiesce.
+			 *    The fabric (clk_out2, IDELAY, up-domain) stays fully powered/
+			 *    clocked and undisturbed -- that is what makes wake reliable. */
+			ad9361_set_en_state_machine_mode(phy, ENSM_MODE_SLEEP);
+			power_state = 0;
+			neorv32_uart0_puts("power_down ok\n");
+
+		} else if (strcmp_cmd(cmd_buffer, CMD_POWER_UP)) {
+			/* Tier-0 wake: re-wake the chip and let l_clk return. Because the
+			 * fabric was never gated in power_down, the axi_ad9361 up-domain
+			 * registers (ADC channel enables, etc.) and the IDELAY taps PERSIST
+			 * across the cycle -- no register re-config is needed. We still
+			 * re-run dig_tune to re-center the eye in case the BBPLL relock
+			 * shifted the DATA_CLK phase; with the fabric undisturbed it passes
+			 * (Tier-0 knockout verified PHASE 2 pn_oos->0, dig_tune returns 0). */
+			if (power_state) { neorv32_uart0_puts("already_up\n"); continue; }
+			/* 1. Wake the chip (SPI is alive even in SLEEP): ALERT, LOs on. */
+			ad9361_set_en_state_machine_mode(phy, ENSM_MODE_ALERT);
+			ad9361_rx_lo_powerdown(phy, 0);
+			ad9361_tx_lo_powerdown(phy, 0);
+			/* 2. Wait for BBPLL relock (it powers the sample/DATA clock; l_clk
+			 *    only returns once locked). Poll 0x05E[7], bounded ~100 ms. */
+			for (int i = 0; i < 1000; i++) {
+				int32_t bb = ad9361_spi_read(phy->spi, 0x05E);
+				if (bb >= 0 && (bb & 0x80)) break;
+				no_os_udelay(100);
+			}
+			/* 2b. Re-run the LO-dependent RF calibrations. Powering the RX/TX
+			 *     synthesizers down (the big Watts lever) and back up leaves the
+			 *     TX-quadrature and RF-DC-offset corrections STALE -> I/Q
+			 *     imbalance / DC -> bad EVM even though the digital capture
+			 *     (dig_tune) is clean. ad9361_do_calib() forces ALERT, runs the
+			 *     cal off the LOs (now relocked), and restores state; RX-quad and
+			 *     BB-DC resume via the tracking cals it re-enables. Run before the
+			 *     datapath/TX is enabled so the loopback signal can't perturb it. */
+			ad9361_do_calib(phy, RFDC_CAL, -1);
+			ad9361_do_calib(phy, TX_QUAD_CAL, -1);
+			/* 3. FDD: chip resumes DATA_CLK -> l_clk returns and the (never-reset)
+			 *    axi_ad9361 dev_if resumes capturing on the same IDELAY taps. */
+			ad9361_set_en_state_machine_mode(phy, ENSM_MODE_FDD);
+			no_os_mdelay(1);
+			/* 4. Re-center the LVDS capture eye (re-tune; taps persisted, this
+			 *    just re-acquires against the relocked DATA_CLK phase). */
+			{
+				uint8_t sk = phy->pdata->dig_interface_tune_skipmode;
+				phy->pdata->dig_interface_tune_skipmode = 1;
+				ad9361_dig_tune(phy, 0, BE_MOREVERBOSE | DO_IDELAY);
+				phy->pdata->dig_interface_tune_skipmode = sk;
+			}
+			/* 5. Datapath enables + re-prime the TX burst (mirrors boot). */
+			neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 1);
+			neorv32_gpio_pin_set(GPIO_UP_TXNRX_PIN, 1);
+			rf_enabled = 1;
+			bridge_reset();
+			bridge_load_tx_data(qpsk_tx_samples, QPSK_TX_NUM_SAMPLES);
+			bridge_enable();
+			/* 6. Restore the R1 operating point. */
+			ad9361_set_rx_gain_control_mode(phy, 0, RF_GAIN_MGC);
+			ad9361_set_rx_rf_gain(phy, 0, 30);
+			ad9361_set_tx_attenuation(phy, 0, 10000);
+			power_state = 1;
+			neorv32_uart0_puts("power_up ok\n");
+
+		} else if (strcmp_cmd(cmd_buffer, CMD_POWER_DOWN_T0)) {
+			/* Bench twin of power_down -- RETAINED as a diagnostic/A-B tool, not
+			 * for normal use (use power_down for that).
+			 *
+			 * It is the same Tier-0 sequence production power_down now uses
+			 * (chip ENSM SLEEP, pwr_dn left LOW so clk_out2 / s_axi_aresetn are
+			 * never gated and the axi_ad9361 up-domain + IDELAY + dev_if stay
+			 * intact). Originally the "knockout" that proved the Tier-1 fabric
+			 * gate cycle was what broke wake capture. Kept in because:
+			 *   (1) if Tier-1 is ever re-enabled in the FPGA, production would
+			 *       assert pwr_dn again and this pair is the Tier-0 reference for
+			 *       an A/B power / functionality comparison; and
+			 *   (2) power_up_t0 dumps the verbose RX-capture diagnostic on wake.
+			 * Keep it byte-for-byte equal to production power_down (minus pwr_dn,
+			 * which production also no longer sets) so the comparison stays honest. */
+			if (!power_state) { neorv32_uart0_puts("already_down\n"); continue; }
+			bridge_reset();
+			neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 0);
+			neorv32_gpio_pin_set(GPIO_UP_TXNRX_PIN, 0);
+			rf_enabled = 0;
+			ad9361_set_en_state_machine_mode(phy, ENSM_MODE_ALERT);
+			ad9361_rx_lo_powerdown(phy, 1);
+			ad9361_tx_lo_powerdown(phy, 1);
+			ad9361_set_en_state_machine_mode(phy, ENSM_MODE_SLEEP);
+			/* NO pwr_dn -- fabric left running. */
+			power_state = 0;
+			neorv32_uart0_puts("power_down_t0 ok\n");
+
+		} else if (strcmp_cmd(cmd_buffer, CMD_POWER_UP_T0)) {
+			/* Bench twin of power_up -- RETAINED as a diagnostic tool (use
+			 * power_up for normal operation). It is the SAME Tier-0 wake as
+			 * production -- including the RFDC/TX_QUAD re-cal that restores EVM,
+			 * so it leaves a CLEAN operating point (no 60% EVM footgun) -- PLUS a
+			 * verbose diag_dig_tune_one_step() readout of the RX-capture state
+			 * after the l_clk stop/restart. Reach for this when you want the
+			 * PHASE 1/2/3 capture dump on a power cycle. Keep it in step with
+			 * production power_up (minus the probe) so the comparison is honest. */
+			if (power_state) { neorv32_uart0_puts("already_up\n"); continue; }
+			ad9361_set_en_state_machine_mode(phy, ENSM_MODE_ALERT);
+			ad9361_rx_lo_powerdown(phy, 0);
+			ad9361_tx_lo_powerdown(phy, 0);
+			for (int i = 0; i < 1000; i++) {
+				int32_t bb = ad9361_spi_read(phy->spi, 0x05E);
+				if (bb >= 0 && (bb & 0x80)) break;
+				no_os_udelay(100);
+			}
+			/* Re-cal the LO-dependent corrections (same as production power_up;
+			 * without this the EVM comes back ~60% after the LO power-cycle). */
+			ad9361_do_calib(phy, RFDC_CAL, -1);
+			ad9361_do_calib(phy, TX_QUAD_CAL, -1);
+			ad9361_set_en_state_machine_mode(phy, ENSM_MODE_FDD);
+			no_os_mdelay(1);
+			/* Verbose capture readout (boot 6.6 probe) + re-acquire dig_tune. */
+			diag_dig_tune_one_step(phy, 8, 8);
+			{
+				uint8_t sk = phy->pdata->dig_interface_tune_skipmode;
+				phy->pdata->dig_interface_tune_skipmode = 1;
+				ad9361_dig_tune(phy, 0, BE_MOREVERBOSE | DO_IDELAY);
+				phy->pdata->dig_interface_tune_skipmode = sk;
+			}
+			neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 1);
+			neorv32_gpio_pin_set(GPIO_UP_TXNRX_PIN, 1);
+			rf_enabled = 1;
+			bridge_reset();
+			bridge_load_tx_data(qpsk_tx_samples, QPSK_TX_NUM_SAMPLES);
+			bridge_enable();
+			ad9361_set_rx_gain_control_mode(phy, 0, RF_GAIN_MGC);
+			ad9361_set_rx_rf_gain(phy, 0, 30);
+			ad9361_set_tx_attenuation(phy, 0, 10000);
+			power_state = 1;
+			neorv32_uart0_puts("power_up_t0 ok\n");
 		}
 		/* Unknown commands silently ignored */
 	}
