@@ -86,6 +86,15 @@
 static int rf_enabled = 0;
 static int power_state = 1;      /* 1 = up, 0 = powered down (Tier 1 low-power) */
 
+/* Boot snapshot of the TX1 quadrature-correction registers (chip SPI:
+ * 0x08E/0x08F TX1 out1 phase/gain, 0x096/0x097 TX1 out2 phase/gain). These hold
+ * the result of the TX_QUAD hardware cal. Re-running that cal on each wake
+ * "succeeds" (ret=0) but drifts to a bad solution (~1 dB I/Q imbalance, EVM 60%
+ * by the 2nd cycle), so power_up RESTORES this boot result instead. */
+static const uint16_t TX_QUAD_CORR_REG[4] = { 0x08E, 0x08F, 0x096, 0x097 };
+static uint8_t  tx_quad_corr_snap[4];
+static int      tx_quad_corr_valid = 0;
+
 /*
  * Read a LF/CR-terminated command line from UART (blocking).
  * Returns number of characters read, or -1 on overflow.
@@ -1317,6 +1326,16 @@ int main(void)
 	neorv32_uart0_puts("[ad9361_no-os] Boot path: RF (SMA cable) — MGC rx_gain=30dB, tx_atten=10dB\n");
 	neorv32_uart0_puts("[ad9361_no-os] !!! external 40-60 dB pad REQUIRED between TX1A_OUT and RX1A_IN\n");
 
+	/* Snapshot the boot TX-quad correction (the chip cal result) so power_up can
+	 * RESTORE it deterministically instead of re-running the drift-prone cal.
+	 * ad9361_init() above ran the TX_QUAD cal to a good result (boot EVM ~2.5%). */
+	for (int i = 0; i < 4; i++)
+		tx_quad_corr_snap[i] = ad9361_spi_read(phy->spi, TX_QUAD_CORR_REG[i]) & 0xFF;
+	tx_quad_corr_valid = 1;
+	neorv32_uart0_printf("[ad9361_no-os] TX-quad corr boot snapshot: %02x %02x %02x %02x\n",
+			     tx_quad_corr_snap[0], tx_quad_corr_snap[1],
+			     tx_quad_corr_snap[2], tx_quad_corr_snap[3]);
+
 	/* 11. UART command loop */
 	neorv32_uart0_puts("[ad9361_no-os] Ready — awaiting commands\n");
 	char cmd_buffer[CMD_BUFFER_SIZE];
@@ -1499,13 +1518,23 @@ int main(void)
 			neorv32_uart0_puts("power_down ok\n");
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_POWER_UP)) {
-			/* Tier-0 wake: re-wake the chip and let l_clk return. Because the
-			 * fabric was never gated in power_down, the axi_ad9361 up-domain
-			 * registers (ADC channel enables, etc.) and the IDELAY taps PERSIST
-			 * across the cycle -- no register re-config is needed. We still
-			 * re-run dig_tune to re-center the eye in case the BBPLL relock
-			 * shifted the DATA_CLK phase; with the fabric undisturbed it passes
-			 * (Tier-0 knockout verified PHASE 2 pn_oos->0, dig_tune returns 0). */
+			/* Tier-0 wake. The fabric was never gated in power_down, so the
+			 * axi_ad9361 up-domain registers (ADC channel enables) and the
+			 * IDELAY taps PERSIST -- no fabric re-config is needed. But the
+			 * chip-side power-down (LO power-down + ENSM SLEEP) and the wake
+			 * dig_tune invalidate THREE things, and ALL must be recovered or the
+			 * constellation is destroyed:
+			 *   (a) TX quadrature correction -- stale after the LO power-cycle.
+			 *       RESTORED from the boot snapshot (step 2b); re-running the cal
+			 *       drifts to ~60% EVM by the 2nd cycle.
+			 *   (b) LVDS capture eye -- re-centered by dig_tune (step 4).
+			 *   (c) chip TX-enable / data-port / BIST state -- dig_tune leaves a
+			 *       residual that compounds across repeated wakes; cleared by the
+			 *       bist_loopback toggle (step 4b) -- the same net effect as the
+			 *       bench "Measure Floor".
+			 * (a) and (c) are independent fixes for independent failures and are
+			 * BOTH REQUIRED: (a) alone still dies on the 2nd-cycle BIST residual;
+			 * (c) alone still has the stale TX quad. Confirmed on HW. */
 			if (power_state) { neorv32_uart0_puts("already_up\n"); continue; }
 			/* 1. Wake the chip (SPI is alive even in SLEEP): ALERT, LOs on. */
 			ad9361_set_en_state_machine_mode(phy, ENSM_MODE_ALERT);
@@ -1518,16 +1547,28 @@ int main(void)
 				if (bb >= 0 && (bb & 0x80)) break;
 				no_os_udelay(100);
 			}
-			/* 2b. Re-run the LO-dependent RF calibrations. Powering the RX/TX
-			 *     synthesizers down (the big Watts lever) and back up leaves the
-			 *     TX-quadrature and RF-DC-offset corrections STALE -> I/Q
-			 *     imbalance / DC -> bad EVM even though the digital capture
-			 *     (dig_tune) is clean. ad9361_do_calib() forces ALERT, runs the
-			 *     cal off the LOs (now relocked), and restores state; RX-quad and
-			 *     BB-DC resume via the tracking cals it re-enables. Run before the
-			 *     datapath/TX is enabled so the loopback signal can't perturb it. */
-			ad9361_do_calib(phy, RFDC_CAL, -1);
-			ad9361_do_calib(phy, TX_QUAD_CAL, -1);
+			/* 2b. Restore the LO-dependent RF corrections that the LO
+			 *     power-cycle invalidated.
+			 *
+			 *     RF DC offset: re-run the cal -- it has no cross-wake state and
+			 *     was verified stable (ret=0, no DC drift), so a fresh measure is
+			 *     fine.
+			 *
+			 *     TX quadrature: DO NOT re-run the cal. ad9361_tx_quad_calib
+			 *     seeds from phy->last_tx_quad_cal_phase, so each wake builds on
+			 *     the previous result and drifts -- it returns 0 ("success") yet
+			 *     lands at ~1 dB I/Q imbalance (EVM ~60%) by the 2nd cycle and
+			 *     never self-corrects. Instead RESTORE the boot cal result (the
+			 *     chip-written TX1 phase/gain corr regs), which is deterministic.
+			 *     Done after the RFDC cal so do_calib's state churn can't disturb
+			 *     it, and before FDD/TX so the correction is in place first. */
+			int32_t cret_dc = ad9361_do_calib(phy, RFDC_CAL, -1);
+			if (tx_quad_corr_valid)
+				for (int i = 0; i < 4; i++)
+					ad9361_spi_write(phy->spi, TX_QUAD_CORR_REG[i],
+							 tx_quad_corr_snap[i]);
+			neorv32_uart0_printf("[power_up] RFDC ret=%d  TX-quad restored(boot)=%d\n",
+					     (int)cret_dc, tx_quad_corr_valid);
 			/* 3. FDD: chip resumes DATA_CLK -> l_clk returns and the (never-reset)
 			 *    axi_ad9361 dev_if resumes capturing on the same IDELAY taps. */
 			ad9361_set_en_state_machine_mode(phy, ENSM_MODE_FDD);
@@ -1540,6 +1581,20 @@ int main(void)
 				ad9361_dig_tune(phy, 0, BE_MOREVERBOSE | DO_IDELAY);
 				phy->pdata->dig_interface_tune_skipmode = sk;
 			}
+			/* 4b. Clear the chip TX-enable / data-port / BIST residual the wake
+			 *     dig_tune leaves behind (it drives BIST + internal loopback +
+			 *     the data port to tune). The residual is harmless on a one-shot
+			 *     boot but COMPOUNDS across repeated wakes and mangles RX by the
+			 *     2nd cycle. This is a SEPARATE failure from the TX-quad staleness
+			 *     in 2b -- both fixes are required (the bench "Measure Floor"
+			 *     clears exactly this residual, which is how it was found).
+			 *     Replicate Measure Floor's net effect: disable any PRBS
+			 *     injection, then toggle bist_loopback. bist_loopback(0) re-runs
+			 *     fix_ch_cross/en_dis_tx (TX channel re-enabled) and rewrites the
+			 *     REG_OBSERVE_CONFIG loop-test bits. */
+			ad9361_bist_prbs(phy, BIST_DISABLE);
+			ad9361_bist_loopback(phy, 1);
+			ad9361_bist_loopback(phy, 0);
 			/* 5. Datapath enables + re-prime the TX burst (mirrors boot). */
 			neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 1);
 			neorv32_gpio_pin_set(GPIO_UP_TXNRX_PIN, 1);
@@ -1600,10 +1655,14 @@ int main(void)
 				if (bb >= 0 && (bb & 0x80)) break;
 				no_os_udelay(100);
 			}
-			/* Re-cal the LO-dependent corrections (same as production power_up;
-			 * without this the EVM comes back ~60% after the LO power-cycle). */
+			/* Restore the LO-dependent corrections (same as production
+			 * power_up): re-run RFDC, restore the boot TX-quad result rather
+			 * than re-running the drift-prone TX_QUAD cal. */
 			ad9361_do_calib(phy, RFDC_CAL, -1);
-			ad9361_do_calib(phy, TX_QUAD_CAL, -1);
+			if (tx_quad_corr_valid)
+				for (int i = 0; i < 4; i++)
+					ad9361_spi_write(phy->spi, TX_QUAD_CORR_REG[i],
+							 tx_quad_corr_snap[i]);
 			ad9361_set_en_state_machine_mode(phy, ENSM_MODE_FDD);
 			no_os_mdelay(1);
 			/* Verbose capture readout (boot 6.6 probe) + re-acquire dig_tune. */
@@ -1614,6 +1673,10 @@ int main(void)
 				ad9361_dig_tune(phy, 0, BE_MOREVERBOSE | DO_IDELAY);
 				phy->pdata->dig_interface_tune_skipmode = sk;
 			}
+			/* Re-establish TX-enable / data-port / BIST state (see power_up). */
+			ad9361_bist_prbs(phy, BIST_DISABLE);
+			ad9361_bist_loopback(phy, 1);
+			ad9361_bist_loopback(phy, 0);
 			neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 1);
 			neorv32_gpio_pin_set(GPIO_UP_TXNRX_PIN, 1);
 			rf_enabled = 1;
