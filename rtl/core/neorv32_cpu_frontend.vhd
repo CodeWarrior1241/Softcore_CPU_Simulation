@@ -162,12 +162,11 @@ begin
   ibus_req_o.stb   <= '1' when (fetch.state = S_REQUEST) and (ipb.free = "11") else '0';
   ibus_req_o.data  <= (others => '0'); -- read-only
   ibus_req_o.ben   <= (others => '1'); -- always full-word access
-  ibus_req_o.rw    <= '0';             -- read-only
-  ibus_req_o.amo   <= '0';             -- cannot be an atomic memory operation
+  ibus_req_o.rw    <= '0'; -- read-only
+  ibus_req_o.amo   <= '0'; -- cannot be an atomic memory operation
   ibus_req_o.amoop <= (others => '0'); -- cannot be an atomic memory operation
-  ibus_req_o.burst <= '0';             -- only single-access
-  ibus_req_o.lock  <= '0';             -- always unlocked access
-  ibus_req_o.fence <= ctrl_i.if_fence; -- fence request, valid without STB being set ("out-of-band" signal)
+  ibus_req_o.burst <= '0'; -- only single-access
+  ibus_req_o.lock  <= '0'; -- always unlocked access
 
   -- IPB instruction data and status --
   ipb.wdata(0) <= (ibus_rsp_i.err or pmp_err_i) & ibus_rsp_i.data(15 downto 0);
@@ -222,6 +221,7 @@ begin
 
     -- half-word select --
     cmd16 <= ipb.rdata(0)(15 downto 0) when (align_q = '0') else ipb.rdata(1)(15 downto 0);
+    frontend_o.i16 <= cmd16; -- original 16-bit instruction
 
     -- Issue Engine FSM -----------------------------------------------------------------------
     -- -------------------------------------------------------------------------------------------
@@ -250,13 +250,13 @@ begin
           issue_valid(0)   <= ipb.avail(0);
           issue_valid(1)   <= '0';
           frontend_o.fault <= ipb.rdata(0)(16);
-          frontend_o.instr <= cmd32;
+          frontend_o.i32   <= cmd32;
           frontend_o.compr <= '1';
         else -- aligned uncompressed, consume both IPB entries
           issue_valid(0)   <= ipb.avail(1) and ipb.avail(0);
           issue_valid(1)   <= ipb.avail(1) and ipb.avail(0);
           frontend_o.fault <= ipb.rdata(1)(16) or ipb.rdata(0)(16);
-          frontend_o.instr <= ipb.rdata(1)(15 downto 0) & ipb.rdata(0)(15 downto 0);
+          frontend_o.i32   <= ipb.rdata(1)(15 downto 0) & ipb.rdata(0)(15 downto 0);
           frontend_o.compr <= '0';
         end if;
       -- start at HIGH half-word --
@@ -266,17 +266,19 @@ begin
           issue_valid(0)   <= '0';
           issue_valid(1)   <= ipb.avail(1);
           frontend_o.fault <= ipb.rdata(1)(16);
-          frontend_o.instr <= cmd32;
+          frontend_o.i32   <= cmd32;
           frontend_o.compr <= '1';
         else -- unaligned uncompressed, consume both IPB entries
           issue_valid(0)   <= ipb.avail(0) and ipb.avail(1);
           issue_valid(1)   <= ipb.avail(0) and ipb.avail(1);
           frontend_o.fault <= ipb.rdata(0)(16) or ipb.rdata(1)(16);
-          frontend_o.instr <= ipb.rdata(0)(15 downto 0) & ipb.rdata(1)(15 downto 0);
+          frontend_o.i32   <= ipb.rdata(0)(15 downto 0) & ipb.rdata(1)(15 downto 0);
           frontend_o.compr <= '0';
         end if;
       end if;
     end process issue_fsm_comb;
+
+    -- original 16-bit instruction word --
 
     -- issue valid instruction word to execution stage --
     frontend_o.valid <= issue_valid(1) or issue_valid(0);
@@ -298,7 +300,8 @@ begin
     cmd32            <= (others => '0');
     ipb.re           <= (others => (ctrl_i.if_ready and ipb.avail(0)));
     frontend_o.valid <= ipb.avail(0);
-    frontend_o.instr <= ipb.rdata(1)(15 downto 0) & ipb.rdata(0)(15 downto 0);
+    frontend_o.i32   <= ipb.rdata(1)(15 downto 0) & ipb.rdata(0)(15 downto 0);
+    frontend_o.i16   <= (others => '0');
     frontend_o.compr <= '0';
     frontend_o.fault <= ipb.rdata(0)(16);
   end generate;

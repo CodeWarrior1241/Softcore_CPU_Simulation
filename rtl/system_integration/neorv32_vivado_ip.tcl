@@ -47,7 +47,7 @@ set_property INCREMENTAL false [get_filesets sim_1]
 
 # read and process NEORV32 SoC file list
 set file_list_file [read [open "$neorv32_home/rtl/file_list_soc.f" r]]
-set file_list [string map [list "NEORV32_RTL_PATH_PLACEHOLDER" "$neorv32_home/rtl"] $file_list_file]
+set file_list [string map [list {$NEORV32_HOME} $neorv32_home] $file_list_file]
 puts "NEORV32 source files:"
 puts $file_list
 add_files $file_list
@@ -264,6 +264,7 @@ proc setup_ip_gui {} {
   add_params $group {
     { RISCV_ISA_Zba {Zba - Shifted-add bit-manipulation instructions} {} }
     { RISCV_ISA_Zbb {Zbb - Basic bit-manipulation instructions}       {} }
+    { RISCV_ISA_Zbc {Zbc - Carry-less multiplication instructions}    {} }
     { RISCV_ISA_Zbs {Zbs - Single-bit bit-manipulation instructions}  {} }
   }
 
@@ -348,21 +349,22 @@ proc setup_ip_gui {} {
   # **************************************************************
   set page [add_page {Caches}]
 
-  set group [add_group $page {Cache Line Size}]
+  set group [add_group $page {General}]
   add_params $group {
-    { CACHE_BLOCK_SIZE {Size in bytes} {Has to be a power a power of two} }
+    { CACHE_BLOCK_SIZE {Cache line size (bytes)} {Has to be a power a power of two} }
+    { CACHE_UC_BASE    {Uncached base address}   {Has to be 256MB-aligned} }
   }
 
   set group [add_group $page {Instruction Cache (I-Cache)}]
   add_params $group {
     { ICACHE_EN         {Enable I-Cache} }
-    { ICACHE_NUM_BLOCKS {Number of I-Cache lines} {Use a power of two} {$ICACHE_EN} }
+    { ICACHE_NUM_BLOCKS {Number of lines} {Use a power of two} {$ICACHE_EN} }
   }
 
   set group [add_group $page {Data Cache (D-Cache)}]
   add_params $group {
     { DCACHE_EN         {Enable D-Cache} }
-    { DCACHE_NUM_BLOCKS {Number of D-Cache lines} {Use a power of two} {$DCACHE_EN} }
+    { DCACHE_NUM_BLOCKS {Number of lines} {Use a power of two} {$DCACHE_EN} }
   }
 
 

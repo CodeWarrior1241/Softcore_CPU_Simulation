@@ -6,7 +6,7 @@
 // -------------------------------------------------------------------------------- //
 // The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
 // Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  //
+// Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  //
 // Licensed under the BSD-3-Clause license, see LICENSE for details.                //
 // SPDX-License-Identifier: BSD-3-Clause                                            //
 // ================================================================================ //
@@ -40,10 +40,11 @@ ocd_entry_exception:
 // DM_CODE_BASE + 4: normal entry - halt CPU and enter park loop
 ocd_entry_park:
   csrw dscratch0, x8                       // backup x8 to dscratch0 so we have a GPR available
-  sb   zero, (DM_SREG_BASE+SREG_HLT)(zero) // send halt-acknowledge
 
 // polling loop (wait for debugger requests)
 ocd_park_loop:
+  sb   zero, (DM_SREG_BASE+SREG_HLT)(zero) // (re-)send halt-acknowledge: CPU is (still) halted
+
   lbu  x8, (DM_SREG_BASE+SREG_EXE)(zero)   // check if pending execute request
   bnez x8, ocd_execute
 
@@ -54,8 +55,7 @@ ocd_park_loop:
 ocd_resume:
   sb   zero, (DM_SREG_BASE+SREG_RES)(zero) // send resume-acknowledge
   csrr x8, dscratch0                       // restore x8 from dscratch0
-  fence                                    // synchronize d-cache and main memory
-  fence.i                                  // synchronize i-cache and main memory
+  fence.i                                  // synchronize I$/D$ and main memory
   dret                                     // exit debug mode
 
 // execute program buffer (implicit ebreak at the to go back to entry_park after execution)
@@ -66,4 +66,5 @@ ocd_execute:
 
 // cause a debug-mode-internal exception if we ever reach this
 ocd_terminate:
-  ecall
+  nop                                      // fill remaining ROM space with NOPs
+  ecall                                    // very last ROM entry: raise exception

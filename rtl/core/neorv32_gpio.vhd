@@ -25,8 +25,8 @@ entity neorv32_gpio is
     bus_req_i  : in  bus_req_t;                      -- bus request
     bus_rsp_o  : out bus_rsp_t;                      -- bus response
     port_dir_o : out std_ulogic_vector(31 downto 0); -- direction control (0 = in, 1 = out)
-    port_out_o : out std_ulogic_vector(31 downto 0); -- input port
-    port_in_i  : in  std_ulogic_vector(31 downto 0); -- output port
+    port_out_o : out std_ulogic_vector(31 downto 0); -- output port
+    port_in_i  : in  std_ulogic_vector(31 downto 0); -- input port
     irq_o      : out std_ulogic                      -- CPU interrupt
   );
 end neorv32_gpio;
@@ -75,7 +75,7 @@ begin
           when addr_tp_c  => irq_pol  <= bus_req_i.data(GPIO_NUM-1 downto 0); -- trigger polarity
           when addr_ie_c  => irq_en   <= bus_req_i.data(GPIO_NUM-1 downto 0); -- interrupt enable
           when addr_ip_c  => irq_clrn <= bus_req_i.data(GPIO_NUM-1 downto 0); -- interrupt pending (clear-only)
-          when others     => NULL;
+          when others     => null;
         end case;
       end if;
       -- read access --
@@ -109,13 +109,11 @@ begin
         end if;
       end if;
     end process dir_write;
-    port_dir_o <= port_dir;
   end generate;
 
   dir_conf_disabled:
   if not GPIO_DIR generate
-    port_dir   <= (others => '0');
-    port_dir_o <= (others => '0');
+    port_dir <= (others => '0');
   end generate;
 
   -- input sampling --
@@ -130,11 +128,13 @@ begin
     end if;
   end process input_stage;
 
-  -- direct output --
-  output_stage: process(port_out)
+  -- output --
+  output_stage: process(port_out, port_dir)
   begin
     port_out_o <= (others => '0');
     port_out_o(GPIO_NUM-1 downto 0) <= port_out;
+    port_dir_o <= (others => '0');
+    port_dir_o(GPIO_NUM-1 downto 0) <= port_dir;
   end process output_stage;
 
 

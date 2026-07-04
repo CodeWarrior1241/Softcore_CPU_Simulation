@@ -44,6 +44,7 @@ entity neorv32_top is
     RISCV_ISA_Zalrsc    : boolean                        := false;         -- atomic reservation-set operations extension
     RISCV_ISA_Zba       : boolean                        := false;         -- shifted-add bit-manipulation extension
     RISCV_ISA_Zbb       : boolean                        := false;         -- basic bit-manipulation extension
+    RISCV_ISA_Zbc       : boolean                        := false;         -- carry-less multiplication instructions
     RISCV_ISA_Zbkb      : boolean                        := false;         -- bit-manipulation instructions for cryptography
     RISCV_ISA_Zbkc      : boolean                        := false;         -- carry-less multiplication instructions
     RISCV_ISA_Zbkx      : boolean                        := false;         -- cryptography crossbar permutation extension
@@ -77,8 +78,8 @@ entity neorv32_top is
     PMP_NAP_MODE_EN     : boolean                        := false;         -- implement NAPOT/NA4 modes
 
     -- Hardware Performance Monitors (HPM) --
-    HPM_NUM_CNTS        : natural range 0 to 13          := 0;             -- number of implemented HPM counters
-    HPM_CNT_WIDTH       : natural range 0 to 64          := 40;            -- total size of HPM counters
+    HPM_NUM_CNTS        : natural range 0 to 29          := 0;             -- number of implemented HPM counters
+    HPM_CNT_WIDTH       : natural range 0 to 64          := 64;            -- total size of HPM counters
 
     -- Internal Instruction memory (IMEM) --
     IMEM_EN             : boolean                        := false;         -- implement processor-internal instruction memory
@@ -99,6 +100,7 @@ entity neorv32_top is
     DCACHE_NUM_BLOCKS   : natural range 1 to 4096        := 4;             -- d-cache: number of blocks, has to be a power of 2
     CACHE_BLOCK_SIZE    : natural range 4 to 1024        := 64;            -- i-cache/d-cache: block size in bytes, has to be a power of 2
     CACHE_BURSTS_EN     : boolean                        := true;          -- i-cache/d-cache: enable issuing of burst transfer for cache update
+    CACHE_UC_BASE       : std_ulogic_vector(31 downto 0) := x"F0000000";   -- base address of uncached address space (has to be 256MB-aligned)
 
     -- External Bus Interface (XBUS) --
     XBUS_EN             : boolean                        := false;         -- implement external bus interface
@@ -130,8 +132,8 @@ entity neorv32_top is
     IO_TWI_EN           : boolean                        := false;         -- implement two-wire interface (TWI)
     IO_TWI_FIFO         : natural range 1 to 2**15       := 1;             -- RTX FIFO depth, has to be zero or a power of two
     IO_TWD_EN           : boolean                        := false;         -- implement two-wire device (TWD)
-    IO_TWD_RX_FIFO      : natural range 1 to 2**15       := 1;             -- TX FIFO depth, has to be zero or a power of two
-    IO_TWD_TX_FIFO      : natural range 1 to 2**15       := 1;             -- RX FIFO depth, has to be zero or a power of two
+    IO_TWD_RX_FIFO      : natural range 1 to 2**15       := 1;             -- RX FIFO depth, has to be zero or a power of two
+    IO_TWD_TX_FIFO      : natural range 1 to 2**15       := 1;             -- TX FIFO depth, has to be zero or a power of two
 
     -- Pulse-Width Modulation Controller (PWM) --
     IO_PWM_NUM          : natural range 0 to 32          := 0;             -- number of PWM channels to implement
@@ -144,9 +146,9 @@ entity neorv32_top is
     IO_TRNG_FIFO        : natural range 1 to 2**15       := 1;             -- data FIFO depth, has to be a power of two
     IO_TRNG_NUM_RO      : natural range 1 to 255         := 3;             -- total number of ring-oscillators
     IO_TRNG_NUM_INV     : natural range 3 to 4095        := 5;             -- number of inverters in first ring-oscillator; has to be odd
-    IO_TRNG_NUM_RBIT    : natural range 1 to 4096        := 64;            -- number of raw bits to process for one output byte; has to be power of two
+    IO_TRNG_NUM_RBIT    : natural range 8 to 4096        := 64;            -- number of raw bits to process for one output byte; has to be power of two
 
-    -- True-Random Number Generator (TRNG) --
+    -- Custom Functions Subsystem (CFS) --
     IO_CFS_EN           : boolean                        := false;         -- implement custom functions subsystem (CFS)
 
     -- Smart LED interface (NEOLED) --
@@ -306,6 +308,7 @@ architecture neorv32_top_rtl of neorv32_top is
   constant cpu_sdtrig_en_c : boolean := OCD_EN and boolean(OCD_NUM_HW_TRIGGERS > 0);
   constant trace_en_c      : boolean := TRACE_PORT_EN or IO_TRACER_EN;
   constant vendorid_c      : std_ulogic_vector(31 downto 0) := x"00000" & '0' & OCD_JEDEC_ID;
+  constant bursts_en_c     : boolean := CACHE_BURSTS_EN and boolean(CACHE_BLOCK_SIZE >= 8);
 
   -- make sure physical memory sizes are a power of two --
   constant imem_size_c : natural := 2**index_size_f(IMEM_SIZE);
@@ -328,6 +331,9 @@ architecture neorv32_top_rtl of neorv32_top is
   -- CPU trace interface --
   type cpu_trace_t is array (0 to num_cores_c-1) of trace_port_t;
   signal cpu_trace : cpu_trace_t;
+
+  -- CPU memory ordering (cache synchronization) --
+  signal cpu_i_fence, cpu_d_fence, icache_sync, dcache_sync : std_ulogic_vector(num_cores_c-1 downto 0);
 
   -- bus: CPU core complex --
   type core_complex_req_t is array (0 to num_cores_c-1) of bus_req_t;
@@ -361,6 +367,10 @@ architecture neorv32_top_rtl of neorv32_top is
   signal cpu_firq : std_ulogic_vector(15 downto 0);
   signal mti, msi : std_ulogic_vector(num_cores_c-1 downto 0);
 
+  -- system time (mtime) --
+  signal mtime : std_ulogic_vector(63 downto 0);
+  signal mtime_lo : std_ulogic_vector(31 downto 0);
+
 begin
 
   -- **************************************************************************************************************************
@@ -384,34 +394,34 @@ begin
       "[NEORV32] Processor Configuration: CPU " & -- cpu core is always enabled
       sel_string_f(boolean(num_cores_c = 1), "(single-core) ",   "") &
       sel_string_f(boolean(num_cores_c = 2), "(smp-dual-core) ", "") &
-      sel_string_f(IMEM_EN,       sel_string_f(imem_as_rom_c, "IMEM-ROM ", "IMEM "), "") &
-      sel_string_f(DMEM_EN,       "DMEM ",     "") &
-      sel_string_f(bootrom_en_c,  "BOOTROM ",  "") &
-      sel_string_f(ICACHE_EN,     "I-CACHE ",  "") &
-      sel_string_f(DCACHE_EN,     "D-CACHE ",  "") &
-      sel_string_f(XBUS_EN,       "XBUS ",     "") &
-      sel_string_f(IO_CLINT_EN,   "CLINT ",    "") &
-      sel_string_f(io_gpio_en_c,  "GPIO ",     "") &
-      sel_string_f(IO_UART0_EN,   "UART0 ",    "") &
-      sel_string_f(IO_UART1_EN,   "UART1 ",    "") &
-      sel_string_f(IO_SPI_EN,     "SPI ",      "") &
-      sel_string_f(IO_SDI_EN,     "SDI ",      "") &
-      sel_string_f(IO_TWI_EN,     "TWI ",      "") &
-      sel_string_f(IO_TWD_EN,     "TWD ",      "") &
-      sel_string_f(io_pwm_en_c,   "PWM ",      "") &
-      sel_string_f(IO_WDT_EN,     "WDT ",      "") &
-      sel_string_f(IO_TRNG_EN,    "TRNG ",     "") &
-      sel_string_f(IO_CFS_EN,     "CFS ",      "") &
-      sel_string_f(IO_NEOLED_EN,  "NEOLED ",   "") &
-      sel_string_f(io_gptmr_en_c, "GPTMR ",    "") &
-      sel_string_f(IO_ONEWIRE_EN, "ONEWIRE ",  "") &
-      sel_string_f(IO_DMA_EN,     "DMA ",      "") &
-      sel_string_f(IO_SLINK_EN,   "SLINK ",    "") &
-      sel_string_f(true,          "SYSINFO ",  "") & -- always enabled
-      sel_string_f(IO_TRACER_EN,  "TRACER ",   "") &
-      sel_string_f(OCD_EN,        "OCD ",      "") &
-      sel_string_f(OCD_EN,        "OCD-AUTH ", "") &
-      sel_string_f(OCD_EN,        "OCD-HWBP ", "") &
+      sel_string_f(IMEM_EN,         sel_string_f(imem_as_rom_c, "IMEM-ROM ", "IMEM "), "") &
+      sel_string_f(DMEM_EN,         "DMEM ",     "") &
+      sel_string_f(bootrom_en_c,    "BOOTROM ",  "") &
+      sel_string_f(ICACHE_EN,       "I-CACHE ",  "") &
+      sel_string_f(DCACHE_EN,       "D-CACHE ",  "") &
+      sel_string_f(XBUS_EN,         "XBUS ",     "") &
+      sel_string_f(IO_CLINT_EN,     "CLINT ",    "") &
+      sel_string_f(io_gpio_en_c,    "GPIO ",     "") &
+      sel_string_f(IO_UART0_EN,     "UART0 ",    "") &
+      sel_string_f(IO_UART1_EN,     "UART1 ",    "") &
+      sel_string_f(IO_SPI_EN,       "SPI ",      "") &
+      sel_string_f(IO_SDI_EN,       "SDI ",      "") &
+      sel_string_f(IO_TWI_EN,       "TWI ",      "") &
+      sel_string_f(IO_TWD_EN,       "TWD ",      "") &
+      sel_string_f(io_pwm_en_c,     "PWM ",      "") &
+      sel_string_f(IO_WDT_EN,       "WDT ",      "") &
+      sel_string_f(IO_TRNG_EN,      "TRNG ",     "") &
+      sel_string_f(IO_CFS_EN,       "CFS ",      "") &
+      sel_string_f(IO_NEOLED_EN,    "NEOLED ",   "") &
+      sel_string_f(io_gptmr_en_c,   "GPTMR ",    "") &
+      sel_string_f(IO_ONEWIRE_EN,   "ONEWIRE ",  "") &
+      sel_string_f(IO_DMA_EN,       "DMA ",      "") &
+      sel_string_f(IO_SLINK_EN,     "SLINK ",    "") &
+      sel_string_f(true,            "SYSINFO ",  "") & -- always enabled
+      sel_string_f(IO_TRACER_EN,    "TRACER ",   "") &
+      sel_string_f(OCD_EN,          "OCD ",      "") &
+      sel_string_f(ocd_auth_en_c,   "OCD-AUTH ", "") &
+      sel_string_f(cpu_sdtrig_en_c, "OCD-HWBP ", "") &
       ""
       severity note;
 
@@ -450,6 +460,10 @@ begin
       "[NEORV32] Using non-default DMEM base address. Configure SW framework accordingly." severity warning;
     assert (or_reduce_f(DMEM_BASE(index_size_f(dmem_size_c)-1 downto 0)) = '0') report
       "[NEORV32] DMEM base address has to be naturally aligned to its size!" severity error;
+
+    -- uncached base address alignment --
+    assert (CACHE_UC_BASE(27 downto 0) = x"0000000") report
+      "[NEORV32] Base address of uncached address space has to be 256MB-aligned!" severity error;
 
   end generate;
 
@@ -529,6 +543,7 @@ begin
       RISCV_ISA_Zalrsc    => RISCV_ISA_Zalrsc,
       RISCV_ISA_Zba       => RISCV_ISA_Zba,
       RISCV_ISA_Zbb       => RISCV_ISA_Zbb,
+      RISCV_ISA_Zbc       => RISCV_ISA_Zbc,
       RISCV_ISA_Zbkb      => RISCV_ISA_Zbkb,
       RISCV_ISA_Zbkc      => RISCV_ISA_Zbkc,
       RISCV_ISA_Zbkx      => RISCV_ISA_Zbkx,
@@ -573,6 +588,7 @@ begin
       clk_i      => clk_i,
       rstn_i     => rstn_sys,
       -- status --
+      mtime_i    => mtime,
       trace_o    => cpu_trace(i),
       sleep_o    => open,
       -- interrupts --
@@ -582,9 +598,11 @@ begin
       firq_i     => cpu_firq,
       dbi_i      => dci_haltreq(i),
       -- instruction bus interface --
+      ifence_o   => cpu_i_fence(i),
       ibus_req_o => cpu_i_req(i),
       ibus_rsp_i => cpu_i_rsp(i),
       -- data bus interface --
+      dfence_o   => cpu_d_fence(i),
       dbus_req_o => cpu_d_req(i),
       dbus_rsp_i => cpu_d_rsp(i)
     );
@@ -597,24 +615,28 @@ begin
       generic map (
         NUM_BLOCKS => ICACHE_NUM_BLOCKS,
         BLOCK_SIZE => CACHE_BLOCK_SIZE,
-        UC_BEGIN   => mem_uncached_begin_c(31 downto 28),
+        UC_BEGIN   => CACHE_UC_BASE(31 downto 28),
         READ_ONLY  => true,
-        BURSTS_EN  => CACHE_BURSTS_EN
+        BURSTS_EN  => bursts_en_c
       )
       port map (
         clk_i      => clk_i,
         rstn_i     => rstn_sys,
+        sync_i     => icache_sync(i),
         host_req_i => cpu_i_req(i),
         host_rsp_o => cpu_i_rsp(i),
         bus_req_o  => icache_req(i),
         bus_rsp_i  => icache_rsp(i)
       );
+      -- fence.i => clear I$
+      icache_sync(i) <= cpu_i_fence(i);
     end generate;
 
     neorv32_icache_disabled:
     if not ICACHE_EN generate
-      icache_req(i) <= cpu_i_req(i);
-      cpu_i_rsp(i)  <= icache_rsp(i);
+      icache_sync(i) <= '0';
+      icache_req(i)  <= cpu_i_req(i);
+      cpu_i_rsp(i)   <= icache_rsp(i);
     end generate;
 
     -- CPU Data Cache -------------------------------------------------------------------------
@@ -625,24 +647,29 @@ begin
       generic map (
         NUM_BLOCKS => DCACHE_NUM_BLOCKS,
         BLOCK_SIZE => CACHE_BLOCK_SIZE,
-        UC_BEGIN   => mem_uncached_begin_c(31 downto 28),
+        UC_BEGIN   => CACHE_UC_BASE(31 downto 28),
         READ_ONLY  => false,
-        BURSTS_EN  => CACHE_BURSTS_EN
+        BURSTS_EN  => bursts_en_c
       )
       port map (
         clk_i      => clk_i,
         rstn_i     => rstn_sys,
+        sync_i     => dcache_sync(i),
         host_req_i => cpu_d_req(i),
         host_rsp_o => cpu_d_rsp(i),
         bus_req_o  => dcache_req(i),
         bus_rsp_i  => dcache_rsp(i)
       );
+      -- fence   => flush D$
+      -- fence.i => clear I$ and flush D$ (so I$ gets updated data #1540)
+      dcache_sync(i) <= cpu_d_fence(i) or cpu_i_fence(i);
     end generate;
 
     neorv32_dcache_disabled:
     if not DCACHE_EN generate
-      dcache_req(i) <= cpu_d_req(i);
-      cpu_d_rsp(i)  <= dcache_rsp(i);
+      dcache_sync(i) <= '0';
+      dcache_req(i)  <= cpu_d_req(i);
+      cpu_d_rsp(i)   <= dcache_rsp(i);
     end generate;
 
     -- Core Instruction/Data Bus Switch -------------------------------------------------------
@@ -982,7 +1009,7 @@ begin
       DEV_27_EN => IO_WDT_EN,         DEV_27_BASE => base_io_wdt_c,
       DEV_28_EN => io_gpio_en_c,      DEV_28_BASE => base_io_gpio_c,
       DEV_29_EN => IO_NEOLED_EN,      DEV_29_BASE => base_io_neoled_c,
-      DEV_30_EN => true,              DEV_30_BASE => base_io_sysinfo_c, -- allways enabled
+      DEV_30_EN => true,              DEV_30_BASE => base_io_sysinfo_c, -- always enabled
       DEV_31_EN => OCD_EN,            DEV_31_BASE => base_io_ocd_c
     )
     port map (
@@ -1158,15 +1185,28 @@ begin
         rstn_i    => rstn_sys,
         bus_req_i => iodev_req(IODEV_CLINT),
         bus_rsp_o => iodev_rsp(IODEV_CLINT),
-        time_o    => mtime_time_o,
+        time_o    => mtime,
         mti_o     => mti,
         msi_o     => msi
       );
+
+      -- synchronize high and low words --
+      mtime_sync: process(rstn_i, clk_i)
+      begin
+        if (rstn_i = '0') then
+          mtime_lo(31 downto 0) <= (others => '0');
+        elsif rising_edge(clk_i) then
+          mtime_lo(31 downto 0) <= mtime(31 downto 0);
+        end if;
+      end process mtime_sync;
+      mtime_time_o <= mtime(63 downto 32) & mtime_lo;
     end generate;
 
     neorv32_clint_disabled:
     if not IO_CLINT_EN generate
       iodev_rsp(IODEV_CLINT) <= rsp_terminate_c;
+      mtime                  <= (others => '0');
+      mtime_lo               <= (others => '0');
       mtime_time_o           <= (others => '0');
       mti                    <= (others => irq_mti_i); -- TODO: provide individual top ports for dual-core w/o internal CLINT
       msi                    <= (others => irq_msi_i); -- TODO: provide individual top ports for dual-core w/o internal CLINT
@@ -1539,7 +1579,8 @@ begin
       DCACHE_EN         => DCACHE_EN,
       DCACHE_NUM_BLOCKS => DCACHE_NUM_BLOCKS,
       CACHE_BLOCK_SIZE  => CACHE_BLOCK_SIZE,
-      CACHE_BURSTS_EN   => CACHE_BURSTS_EN,
+      CACHE_BURSTS_EN   => bursts_en_c,
+      CACHE_UC_BASE     => CACHE_UC_BASE(31 downto 28),
       XBUS_EN           => XBUS_EN,
       OCD_EN            => OCD_EN,
       OCD_AUTH          => ocd_auth_en_c,

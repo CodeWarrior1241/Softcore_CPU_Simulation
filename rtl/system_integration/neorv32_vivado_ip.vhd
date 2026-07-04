@@ -2,8 +2,8 @@
 -- NEORV32 - Processor Wrapper with AXI4 & AXI4-Stream Compatible Interfaces        --
 -- -------------------------------------------------------------------------------- --
 -- Dedicated for IP packaging/integration using AMD Vivado.                         --
--- Use the provided TCL script to automatically package this as IP module:          --
--- Vivado TCL console: > source neorv32_vivado_ip.tcl                               --
+-- Use the provided TCL script to automatically package this as IP module: navigate --
+-- to this file and run "source neorv32_vivado_ip.tcl" in the Vivado TCL console.   --
 -- See the NEORV32 Datasheet and User Guide for more information.                   --
 -- -------------------------------------------------------------------------------- --
 -- The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              --
@@ -45,6 +45,7 @@ entity neorv32_vivado_ip is
     RISCV_ISA_Zalrsc      : boolean                        := false;
     RISCV_ISA_Zba         : boolean                        := false;
     RISCV_ISA_Zbb         : boolean                        := false;
+    RISCV_ISA_Zbc         : boolean                        := false;
     RISCV_ISA_Zbkb        : boolean                        := false;
     RISCV_ISA_Zbkc        : boolean                        := false;
     RISCV_ISA_Zbkx        : boolean                        := false;
@@ -75,8 +76,8 @@ entity neorv32_vivado_ip is
     PMP_TOR_MODE_EN       : boolean                        := false;
     PMP_NAP_MODE_EN       : boolean                        := false;
     -- Hardware Performance Monitors (HPM) --
-    HPM_NUM_CNTS          : natural range 0 to 13          := 0;
-    HPM_CNT_WIDTH         : natural range 0 to 64          := 40;
+    HPM_NUM_CNTS          : natural range 0 to 29          := 0;
+    HPM_CNT_WIDTH         : natural range 0 to 64          := 64;
     -- Internal Instruction Memory (IMEM) --
     IMEM_EN               : boolean                        := false;
     IMEM_BASE             : std_ulogic_vector(31 downto 0) := x"00000000";
@@ -94,6 +95,7 @@ entity neorv32_vivado_ip is
     DCACHE_NUM_BLOCKS     : natural range 1 to 4096        := 4;
     CACHE_BLOCK_SIZE      : natural range 4 to 1024        := 64;
     CACHE_BURSTS_EN       : boolean                        := true;
+    CACHE_UC_BASE         : std_ulogic_vector(31 downto 0) := x"F0000000";
     -- External Bus Interface (XBUS) --
     XBUS_EN               : boolean                        := false;
     XBUS_TIMEOUT          : natural                        := 2048;
@@ -134,8 +136,8 @@ entity neorv32_vivado_ip is
     IO_TRNG_FIFO          : natural range 1 to 2**15       := 1;
     IO_TRNG_NUM_RO        : natural range 1 to 255         := 3;
     IO_TRNG_NUM_INV       : natural range 3 to 4095        := 5;
-    IO_TRNG_NUM_RBIT      : natural range 1 to 4096        := 64;
-    -- True-Random Number Generator (TRNG) --
+    IO_TRNG_NUM_RBIT      : natural range 8 to 4096        := 64;
+    -- Custom Functions Subsystem (CFS) --
     IO_CFS_EN             : boolean                        := false;
     -- Smart LED interface (NEOLED) --
     IO_NEOLED_EN          : boolean                        := false;
@@ -156,7 +158,6 @@ entity neorv32_vivado_ip is
     IO_TRACER_EN          : boolean                        := false;
     IO_TRACER_BUFFER      : natural range 1 to 2**15       := 1;
     IO_TRACER_SIMLOG_EN   : boolean                        := false
-
   );
   port (
     -- ------------------------------------------------------------
@@ -402,6 +403,7 @@ begin
     RISCV_ISA_Zalrsc    => RISCV_ISA_Zalrsc,
     RISCV_ISA_Zba       => RISCV_ISA_Zba,
     RISCV_ISA_Zbb       => RISCV_ISA_Zbb,
+    RISCV_ISA_Zbc       => RISCV_ISA_Zbc,
     RISCV_ISA_Zbkb      => RISCV_ISA_Zbkb,
     RISCV_ISA_Zbkc      => RISCV_ISA_Zbkc,
     RISCV_ISA_Zbkx      => RISCV_ISA_Zbkx,

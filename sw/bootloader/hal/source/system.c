@@ -50,8 +50,6 @@ static void __attribute__((interrupt("machine"),aligned(4))) system_trap_handler
     uart_putc(' ');
     uart_puth(neorv32_cpu_csr_read(CSR_MEPC));
     uart_putc(' ');
-    uart_puth(neorv32_cpu_csr_read(CSR_MTINST));
-    uart_putc(' ');
     uart_puth(neorv32_cpu_csr_read(CSR_MTVAL));
     uart_puts(VT_TERM_HL_OFF "\n");
   }
@@ -91,7 +89,7 @@ void system_setup(void) {
 #if (UART_EN == 1)
   if (neorv32_uart0_available()) {
     neorv32_uart0_setup(UART_BAUD, 0);
-#if (UART_OVERFLOW == 1)
+#if (UART_HWFC == 1)
     neorv32_uart0_rtscts_enable(); // enable RTS/CTS hardware flow control
 #endif
   }
@@ -106,6 +104,9 @@ void system_setup(void) {
     neorv32_cpu_csr_write(CSR_MIE, 1 << CSR_MIE_MTIE); // enable timer IRQ source
     neorv32_cpu_csr_set(CSR_MSTATUS, 1 << CSR_MSTATUS_MIE); // enable machine-mode interrupts
   }
+
+  // user-defined initialization code; macro defined in config.h
+  USER_CODE_INIT;
 }
 
 
@@ -203,7 +204,7 @@ int system_app_store(int (*dev_init)(void), int (*dev_erase)(void), int (*stream
   header.signature = BIN_SIGNATURE;
   header.base_addr = g_exe_base;
   header.size      = g_exe_size;
-  header.checksum  = g_exe_base;
+  header.checksum  = 0; // initialize checksum computation
   uint32_t addr_backup = g_flash_addr; // backup initial start address
 
   // confirmation prompt
@@ -251,8 +252,7 @@ int system_app_store(int (*dev_init)(void), int (*dev_erase)(void), int (*stream
   rc |= stream_put(header.signature);
   rc |= stream_put(header.base_addr);
   rc |= stream_put(header.size);
-  header.checksum = ~header.checksum;
-  rc |= stream_put(header.checksum);
+  rc |= stream_put(~header.checksum);
 
   if (rc) {
     uart_puts("\aERROR_DEVICE\n");
@@ -299,9 +299,10 @@ void system_app_boot(void) {
 
   // start application
   asm volatile (
-    "fence.i            \n"
-    "csrw mepc, %[addr] \n"
-    "mret               \n"
+    "fence.i                 \n"
+    "csrw mepc, %[addr]      \n"
+    "la ra, __crt0_main_exit \n" // in case app's main tries to return...
+    "mret                    \n"
     : : [addr] "r" (boot_addr)
   );
 
