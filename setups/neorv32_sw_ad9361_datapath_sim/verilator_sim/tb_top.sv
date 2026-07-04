@@ -355,8 +355,20 @@ module tb_top;
     //--------------------------------------------------------------------------
     int axi_timeout;
 
+    // NOTE: all drive changes happen #1 after the clock edge. Deasserting a
+    // handshake signal with a blocking assignment in the same time step as
+    // the sampling edge is a scheduling race (some DUT always blocks can
+    // evaluate before the TB process, some after, seeing different values of
+    // the same signal at the same edge). Verilator 5.048's static schedule
+    // resolves that race against ar_hs-gated logic, making every AXI read
+    // return 0. Verilator demotes non-blocking assignments in initial-block
+    // tasks to blocking (INITIALDLY), so off-edge blocking drives are the
+    // portable fix.
+    logic aw_hs_done, w_hs_done;
+
     task bridge_write(input [13:0] addr, input [31:0] data);
         @(posedge clk_150);
+        #1;
         bridge_awaddr  = addr;
         bridge_awvalid = 1;
         bridge_wdata   = data;
@@ -365,9 +377,13 @@ module tb_top;
         bridge_bready  = 1;
         axi_timeout = 0;
         while (axi_timeout < 200) begin
-            @(posedge clk_150);
-            if (bridge_awready) bridge_awvalid = 0;
-            if (bridge_wready)  bridge_wvalid  = 0;
+            @(negedge clk_150);   // sample settled mid-cycle values: exactly what the DUT flops see at the next edge
+            aw_hs_done = bridge_awvalid && bridge_awready;
+            w_hs_done  = bridge_wvalid  && bridge_wready;
+            @(posedge clk_150);   // handshake completes here for any channel with valid && ready
+            #1;
+            if (aw_hs_done) bridge_awvalid = 0;
+            if (w_hs_done)  bridge_wvalid  = 0;
             if (!bridge_awvalid && !bridge_wvalid) break;
             axi_timeout++;
         end
@@ -377,11 +393,13 @@ module tb_top;
             axi_timeout++;
         end
         @(posedge clk_150);
+        #1;
         bridge_bready = 0;
     endtask
 
     task bridge_read(input [13:0] addr, output [31:0] data);
         @(posedge clk_150);
+        #1;
         bridge_araddr  = addr;
         bridge_arvalid = 1;
         bridge_rready  = 1;
@@ -391,6 +409,7 @@ module tb_top;
             axi_timeout++;
         end
         @(posedge clk_150);
+        #1;
         bridge_arvalid = 0;
         axi_timeout = 0;
         while (!bridge_rvalid && axi_timeout < 200) begin
@@ -399,6 +418,7 @@ module tb_top;
         end
         data = bridge_rdata;
         @(posedge clk_150);
+        #1;
         bridge_rready = 0;
     endtask
 
