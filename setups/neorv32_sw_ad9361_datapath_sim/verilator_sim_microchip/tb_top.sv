@@ -1,0 +1,561 @@
+//==============================================================================
+// tb_top.sv
+//
+// Testbench for AD9361 datapath simulation (Verilator --timing) —
+// Microchip PolarFire (mpf300) variant of ../verilator_sim/tb_top.sv.
+//
+//==============================================================================
+// Scope: Datapath-only, no axi_ad9361 LVDS transceiver, no CPU
+//==============================================================================
+//
+// This testbench exercises the STREAMING DATAPATH chain of the mpf300
+// FMCOMMS2 design (deps/hdl/projects/fmcomms2/mpf300):
+//   axi_ad9361_adapter -> CDC FIFOs -> axi_lite_to_streaming_adapter
+// (SmartHLS ports + PULP cdc_fifo_gray CDC FIFOs) and its reverse TX path.
+// The testbench acts as both the "CPU" (driving AXI-Lite) and the "AD9361
+// transceiver" (driving ADC / reading DAC).
+//
+// The TB code is deliberately kept as close as possible to the Xilinx
+// variant — same stimulus, same test sequence, same checks. The deltas:
+//   * clock parameters: the mpf300 CPU/AXI fabric runs at 125 MHz (PF_CCC
+//     from a 50 MHz reference) instead of 150 MHz (clk_wiz from 300 MHz);
+//     the clk_150/ecs_clk signal names are kept so the diff stays minimal.
+//   * clock generator: pf_ccc_behavioral (same shim port names) replaces
+//     clk_wiz_behavioral's Top_ECS_Clock_300MHz_0.
+//   * bridge register map: the SmartHLS port of the streaming adapter has
+//     its own map (regs 0x0000..0x0014, tx_data 0x0018, rx_data 0x1018 —
+//     see src/axi_lite_to_streaming_adapter_microchip/*.hpp); the Vitis
+//     offsets (0x10/0x14/0x20/0x28, 0x1000/0x2000) do not carry over.
+//
+//------------------------------------------------------------------------------
+// What IS NOT simulated (and why)
+//------------------------------------------------------------------------------
+//
+//   NEORV32 CPU + axi_1to3_decoder + BRAM:
+//     out of datapath scope, as on the Xilinx variant (there the fabric was
+//     encrypted SmartConnect; here the PULP axi_lite_xbar interconnect is
+//     open source but the CPU-side system is still covered by the Libero
+//     flow, not this sim).
+//
+//   axi_ad9361 (ADI LVDS transceiver, PolarFire device interface):
+//     covered by the QuestaSim loopback TB in
+//     deps/hdl/library/axi_ad9361/sim/microchip. The TB drives the
+//     adapter's ADC/DAC-side ports directly instead.
+//
+//   PF_CCC (PLL):
+//     generated core with an encrypted simulation model. Replaced with
+//     pf_ccc_behavioral.sv (counterpart of clk_wiz_behavioral.sv).
+//
+//   sys_ctrl / lclk_reset_sync (open-logic olo_base_reset_gen + cc_bits):
+//     VHDL — Verilator compiles no VHDL (same reason the Xilinx variant
+//     replaced the VHDL-origin proc_sys_reset). Modeled by the behavioral
+//     reset synchronizers in datapath_top.sv.
+//
+//   power-gating (pwr_dn reset-hold):
+//     intentionally NOT modeled, as on the Xilinx variant: no CPU to
+//     source pwr_dn and no axi_ad9361 to gate in this datapath-only sim.
+//
+//------------------------------------------------------------------------------
+// What IS simulated
+//------------------------------------------------------------------------------
+//
+//   axi_ad9361_adapter    (SmartHLS RTL, src/axi_ad9361_adapter_microchip)
+//   TX CDC FIFO           (mpf300 axis_async_fifo = PULP cdc_fifo_gray)
+//   RX CDC FIFO           (mpf300 axis_async_fifo = PULP cdc_fifo_gray)
+//   axi_lite_to_streaming_adapter (SmartHLS RTL,
+//                          src/axi_lite_to_streaming_adapter_microchip)
+//   dac_hold              (mpf300 DAC holding registers)
+//   PF_CCC                (behavioral replacement, pf_ccc_behavioral.sv)
+//   fabric / l_clk reset synchronizers (behavioral, in datapath_top.sv)
+//
+//------------------------------------------------------------------------------
+// Architecture
+//------------------------------------------------------------------------------
+//
+//   TB (acts as CPU)               TB (acts as AD9361)
+//     |                              |
+//     | AXI-Lite (14-bit)            | ADC I/Q + valid/enable (125 MHz)
+//     v                              v
+//   +-----------------------------+  +-------------------+
+//   | axi_lite_to_streaming_      |  | axi_ad9361_       |
+//   | adapter (SmartHLS, 125 MHz) |  | adapter (SmartHLS,|
+//   |   tx_stream -> TX CDC FIFO -+->|   125 MHz l_clk)  |
+//   |   rx_stream <- RX CDC FIFO -+<-|                   |-> DAC I/Q to TB
+//   +-----------------------------+  +-------------------+
+//
+//------------------------------------------------------------------------------
+// Test sequence (mirrors sw/ad9361_loopback/main.c, minus AD9361 reg config)
+//------------------------------------------------------------------------------
+//
+//   1. Release reset, wait for clk_150 PLL lock.
+//   2. Enable ADC stimulus (drive adc_valid/enable + I/Q data from COE file).
+//   3. Enable DAC requests (generated inside datapath_top for the SmartHLS
+//      adapter, whose dac_valid/enable are inputs).
+//   4. Load 1024 TX samples into bridge tx_data[] via AXI-Lite.
+//   5. Pulse bridge enable, wait for state == RECEIVE.
+//   6. For N cycles: poll rx_sample_count, read rx_data[], pulse rx_read_done.
+//   7. Report PASS/FAIL.
+//
+//==============================================================================
+
+`timescale 1ns / 1ps
+
+module tb_top;
+
+    //--------------------------------------------------------------------------
+    // Parameters
+    //--------------------------------------------------------------------------
+    parameter real CLK150_PERIOD_NS     = 8.0;     // mpf300 fabric clock: 125 MHz
+                                                   // (name kept from the Xilinx TB)
+    parameter real L_CLK_PERIOD_NS      = 8.0;     // 125 MHz
+    parameter real ECS_CLK_PERIOD_NS    = 20.0;    // 50 MHz (PF_CCC reference)
+    parameter NUM_COE_SAMPLES       = 1024;
+    parameter NUM_READBACK_CYCLES   = 3;
+
+    //--------------------------------------------------------------------------
+    // ADC stimulus realism parameters
+    //--------------------------------------------------------------------------
+    // The original TB drove adc_valid_i0/q0 high every l_clk cycle and updated
+    // adc_data_i0/q0 every cycle. That doesn't match the AD9361 in 1R1T DDR
+    // LVDS mode, where:
+    //   - adc_valid_i0/q0 pulses at the sample rate (~50% duty on l_clk),
+    //     not every cycle
+    //   - adc_data_i0/q0 is held stable between valid pulses, not churned
+    //
+    // The original TB also started driving stimulus within one l_clk cycle of
+    // reset release. In HW the adapter sits idle for many ms (chip init,
+    // bridge load, etc.) before the chip starts producing samples — so the
+    // adapter pipeline has been clocking through "no valid pulses" iterations
+    // for a long time before the first capture. The sim now models this with
+    // an explicit idle window.
+    //
+    // These three changes (pulsed valid, held data, idle window) bring the sim
+    // closer to HW so it can repro any HLS state-machine bug that depends on
+    // the gap between captures or on adapter behavior during the long
+    // pre-stimulus idle. CDC paths are intentionally NOT modified — they are
+    // verified by Vivado constraint reports in HW build.
+    //--------------------------------------------------------------------------
+    parameter STIM_IDLE_NS          = 100_000;  // 100 us pre-stimulus idle
+    parameter STIM_VALID_HIGH_CYC   = 1;        // l_clk cycles valid=1
+    parameter STIM_VALID_LOW_CYC    = 1;        // l_clk cycles valid=0 (data held)
+
+    // Bridge register offsets (14-bit addr) — SmartHLS port register map
+    // (src/axi_lite_to_streaming_adapter_microchip/axi_lite_to_streaming_adapter.hpp)
+    parameter [13:0] BRIDGE_REG_ENABLE       = 14'h0000;
+    parameter [13:0] BRIDGE_REG_RX_READ_DONE = 14'h0004;
+    parameter [13:0] BRIDGE_REG_STATE        = 14'h000C;
+    parameter [13:0] BRIDGE_REG_RX_COUNT     = 14'h0014;
+    parameter [13:0] BRIDGE_TX_DATA_BASE     = 14'h0018;
+    parameter [13:0] BRIDGE_RX_DATA_BASE     = 14'h1018;
+    parameter [31:0] BRIDGE_STATE_RECEIVE    = 32'd3;
+
+    // AXI handshake timeout, in fabric-clock cycles. The Xilinx TB used 200;
+    // the SmartHLS bridge defers AXI write DATA beats until a streaming TX
+    // burst finishes (the datapath owns tx_data during SEND), which can hold
+    // a beat for a whole 1024-word burst drained at the l_clk sample rate —
+    // same allowance as the unit TB in
+    // src/axi_lite_to_streaming_adapter_microchip/verilator_sim.
+    parameter AXI_TIMEOUT = 16384;
+
+    //--------------------------------------------------------------------------
+    // Clocks and reset
+    //--------------------------------------------------------------------------
+    reg ecs_clk_p = 0, ecs_clk_n = 1;
+    always #(ECS_CLK_PERIOD_NS / 2.0) begin ecs_clk_p = ~ecs_clk_p; ecs_clk_n = ~ecs_clk_n; end
+
+    reg l_clk = 0;
+    always #(L_CLK_PERIOD_NS / 2.0) l_clk = ~l_clk;
+
+    reg system_resetn = 0;
+
+    // PF_CCC (behavioral): 50 MHz ref in -> 125 MHz fabric clock + locked
+    // (wire names kept from the Xilinx TB; clk_150 runs at 125 MHz here)
+    wire clk_150, clk_300, clk_locked;
+    pf_ccc_behavioral clk_wiz (
+        .clk_in1_p(ecs_clk_p), .clk_in1_n(ecs_clk_n),
+        .resetn(system_resetn),
+        .clk_out1(clk_150), .clk_out2(clk_300), .locked(clk_locked)
+    );
+
+    //--------------------------------------------------------------------------
+    // ADC stimulus (TB acts as AD9361 transceiver)
+    //--------------------------------------------------------------------------
+    reg [15:0] adc_data_i0 = 0, adc_data_q0 = 0;
+    reg [15:0] adc_data_i1 = 0, adc_data_q1 = 0;
+    reg        adc_valid_i0 = 0, adc_valid_q0 = 0;
+    reg        adc_valid_i1 = 0, adc_valid_q1 = 0;
+    reg        adc_enable_i0 = 0, adc_enable_q0 = 0;
+    reg        adc_enable_i1 = 0, adc_enable_q1 = 0;
+
+    // DAC outputs (from adapter, TB reads)
+    wire [15:0] dac_data_i0, dac_data_q0, dac_data_i1, dac_data_q1;
+    wire        dac_valid_i0, dac_valid_q0, dac_valid_i1, dac_valid_q1;
+    wire        dac_enable_i0, dac_enable_q0, dac_enable_i1, dac_enable_q1;
+
+    //--------------------------------------------------------------------------
+    // AXI-Lite to streaming adapter (14-bit addr)
+    //--------------------------------------------------------------------------
+    reg  [13:0] bridge_awaddr = 0;
+    reg         bridge_awvalid = 0;
+    wire        bridge_awready;
+    reg  [31:0] bridge_wdata = 0;
+    reg   [3:0] bridge_wstrb = 4'hF;
+    reg         bridge_wvalid = 0;
+    wire        bridge_wready;
+    wire  [1:0] bridge_bresp;
+    wire        bridge_bvalid;
+    reg         bridge_bready = 0;
+    reg  [13:0] bridge_araddr = 0;
+    reg         bridge_arvalid = 0;
+    wire        bridge_arready;
+    wire [31:0] bridge_rdata;
+    wire  [1:0] bridge_rresp;
+    wire        bridge_rvalid;
+    reg         bridge_rready = 0;
+
+    //--------------------------------------------------------------------------
+    // COE data
+    //--------------------------------------------------------------------------
+    reg [31:0] coe_data [0:NUM_COE_SAMPLES-1];
+
+    //--------------------------------------------------------------------------
+    // DUT
+    //--------------------------------------------------------------------------
+    datapath_top dut (
+        .clk_150        (clk_150),
+        .clk_150_locked (clk_locked),
+        .l_clk          (l_clk),
+        .system_resetn  (system_resetn),
+
+        .adc_data_i0    (adc_data_i0),
+        .adc_data_q0    (adc_data_q0),
+        .adc_data_i1    (adc_data_i1),
+        .adc_data_q1    (adc_data_q1),
+        .adc_valid_i0   (adc_valid_i0),
+        .adc_valid_q0   (adc_valid_q0),
+        .adc_valid_i1   (adc_valid_i1),
+        .adc_valid_q1   (adc_valid_q1),
+        .adc_enable_i0  (adc_enable_i0),
+        .adc_enable_q0  (adc_enable_q0),
+        .adc_enable_i1  (adc_enable_i1),
+        .adc_enable_q1  (adc_enable_q1),
+
+        .dac_data_i0    (dac_data_i0),
+        .dac_data_q0    (dac_data_q0),
+        .dac_data_i1    (dac_data_i1),
+        .dac_data_q1    (dac_data_q1),
+        .dac_valid_i0   (dac_valid_i0),
+        .dac_valid_q0   (dac_valid_q0),
+        .dac_valid_i1   (dac_valid_i1),
+        .dac_valid_q1   (dac_valid_q1),
+        .dac_enable_i0  (dac_enable_i0),
+        .dac_enable_q0  (dac_enable_q0),
+        .dac_enable_i1  (dac_enable_i1),
+        .dac_enable_q1  (dac_enable_q1),
+
+        .bridge_awaddr  (bridge_awaddr),
+        .bridge_awvalid (bridge_awvalid),
+        .bridge_awready (bridge_awready),
+        .bridge_wdata   (bridge_wdata),
+        .bridge_wstrb   (bridge_wstrb),
+        .bridge_wvalid  (bridge_wvalid),
+        .bridge_wready  (bridge_wready),
+        .bridge_bresp   (bridge_bresp),
+        .bridge_bvalid  (bridge_bvalid),
+        .bridge_bready  (bridge_bready),
+        .bridge_araddr  (bridge_araddr),
+        .bridge_arvalid (bridge_arvalid),
+        .bridge_arready (bridge_arready),
+        .bridge_rdata   (bridge_rdata),
+        .bridge_rresp   (bridge_rresp),
+        .bridge_rvalid  (bridge_rvalid),
+        .bridge_rready  (bridge_rready)
+    );
+
+    //--------------------------------------------------------------------------
+    // Load COE data
+    //--------------------------------------------------------------------------
+    initial begin
+        $readmemh("qpsk_bram_data.hex", coe_data);
+        if (coe_data[0] === 32'bx) begin
+            $display("ERROR: Failed to load qpsk_bram_data.hex");
+            $finish;
+        end
+        $display("[%0t] Loaded %0d COE samples", $time, NUM_COE_SAMPLES);
+    end
+
+    //--------------------------------------------------------------------------
+    // Reset
+    //--------------------------------------------------------------------------
+    initial begin
+        system_resetn = 0;
+        #200;  // 200 ns — behavioral clk_wiz locks in 16 cycles (~53 ns)
+        system_resetn = 1;
+        $display("[%0t] Reset released", $time);
+    end
+
+    //--------------------------------------------------------------------------
+    // ADC stimulus — HW-faithful pulsed-valid generator
+    //--------------------------------------------------------------------------
+    // Simulates what the AD9361 IP delivers to the adapter in 1R1T DDR LVDS:
+    //   1. Idle window after reset (no valid pulses, no data) lasting
+    //      STIM_IDLE_NS, modelling the HW interval between fabric reset
+    //      release and the chip actually producing samples (chip init,
+    //      ad9361_post_setup, bridge_load_tx_data, bridge_enable, GPIO
+    //      up_enable=1 — all happens before adc_valid first pulses).
+    //
+    //   2. Once active, adc_valid_i0/q0 pulses with a STIM_VALID_HIGH_CYC /
+    //      STIM_VALID_LOW_CYC duty cycle (default 1/1 = 50% duty) instead of
+    //      being held high every cycle. This matches the chip's behavior of
+    //      delivering one I+Q sample every two l_clk cycles.
+    //
+    //   3. adc_data_i0/q0 is updated only on the FIRST cycle of each valid
+    //      pulse (when valid asserts) and held stable for the rest of the
+    //      pulse and the following low period. This matches HW: the chip
+    //      drives the data buses with a held value between sample events,
+    //      it does not churn data on every l_clk cycle.
+    //
+    // The original "valid=1 always, churn data every cycle" stimulus pattern
+    // could mask any HLS pipeline bug whose behavior depends on rx_valid
+    // going low, or on adc_data being stable across multiple cycles. This
+    // updated stimulus exercises both gaps.
+    //
+    // adc_enable_i0/q0 is asserted before any data flows and held throughout
+    // (the bit is set by no-OS post_setup at boot in HW; the channel-enable
+    // CDC is verified by Vivado constraint analysis).
+    //--------------------------------------------------------------------------
+    integer coe_index;
+    integer adc_samples_sent;
+    integer cyc;
+
+    always begin
+        wait(system_resetn && clk_locked);
+        @(posedge l_clk);
+
+        // Initial state: enables high (channel selected), but no valid and
+        // no data — adapter pipeline runs with rx_valid=0 every cycle.
+        adc_enable_i0 = 1; adc_enable_q0 = 1;
+        adc_valid_i0  = 0; adc_valid_q0  = 0;
+        adc_data_i0   = 16'h0000;
+        adc_data_q0   = 16'h0000;
+        coe_index     = 0;
+        adc_samples_sent = 0;
+
+        $display("[%0t] ADC stimulus: idle phase (%0d ns) — adapter clocks with no captures",
+                 $time, STIM_IDLE_NS);
+
+        // Idle window: no valid pulses, adapter sits in CAPTURING with
+        // rx_fill_level stuck at 0. Models the HW pre-stimulus interval.
+        #STIM_IDLE_NS;
+        @(posedge l_clk);
+
+        $display("[%0t] ADC stimulus: pulsed-valid phase begins (duty %0d/%0d)",
+                 $time, STIM_VALID_HIGH_CYC, STIM_VALID_HIGH_CYC + STIM_VALID_LOW_CYC);
+
+        forever begin
+            // Phase A: assert valid, present a NEW sample on adc_data
+            adc_data_i0  = coe_data[coe_index][15:0];
+            adc_data_q0  = coe_data[coe_index][31:16];
+            adc_valid_i0 = 1; adc_valid_q0 = 1;
+
+            // Hold for STIM_VALID_HIGH_CYC l_clk cycles (default 1).
+            // The adapter captures on the first cycle where rx_valid is
+            // high and rx_fill_level < BRAM_DEPTH.
+            for (cyc = 0; cyc < STIM_VALID_HIGH_CYC; cyc++)
+                @(posedge l_clk);
+
+            adc_samples_sent = adc_samples_sent + 1;
+            coe_index = coe_index + 1;
+            if (coe_index >= NUM_COE_SAMPLES)
+                coe_index = 0;
+
+            // Phase B: deassert valid; HOLD adc_data at the previous value
+            // (intentionally do NOT update adc_data here — HW holds it).
+            adc_valid_i0 = 0; adc_valid_q0 = 0;
+
+            for (cyc = 0; cyc < STIM_VALID_LOW_CYC; cyc++)
+                @(posedge l_clk);
+        end
+    end
+
+    //--------------------------------------------------------------------------
+    // AXI-Lite helper tasks
+    //--------------------------------------------------------------------------
+    int axi_timeout;
+
+    // NOTE: all drive changes happen #1 after the clock edge. Deasserting a
+    // handshake signal with a blocking assignment in the same time step as
+    // the sampling edge is a scheduling race (some DUT always blocks can
+    // evaluate before the TB process, some after, seeing different values of
+    // the same signal at the same edge). Verilator 5.048's static schedule
+    // resolves that race against ar_hs-gated logic, making every AXI read
+    // return 0. Verilator demotes non-blocking assignments in initial-block
+    // tasks to blocking (INITIALDLY), so off-edge blocking drives are the
+    // portable fix.
+    logic aw_hs_done, w_hs_done;
+
+    task bridge_write(input [13:0] addr, input [31:0] data);
+        @(posedge clk_150);
+        #1;
+        bridge_awaddr  = addr;
+        bridge_awvalid = 1;
+        bridge_wdata   = data;
+        bridge_wstrb   = 4'hF;
+        bridge_wvalid  = 1;
+        bridge_bready  = 1;
+        axi_timeout = 0;
+        while (axi_timeout < AXI_TIMEOUT) begin
+            @(negedge clk_150);   // sample settled mid-cycle values: exactly what the DUT flops see at the next edge
+            aw_hs_done = bridge_awvalid && bridge_awready;
+            w_hs_done  = bridge_wvalid  && bridge_wready;
+            @(posedge clk_150);   // handshake completes here for any channel with valid && ready
+            #1;
+            if (aw_hs_done) bridge_awvalid = 0;
+            if (w_hs_done)  bridge_wvalid  = 0;
+            if (!bridge_awvalid && !bridge_wvalid) break;
+            axi_timeout++;
+        end
+        axi_timeout = 0;
+        while (!bridge_bvalid && axi_timeout < AXI_TIMEOUT) begin
+            @(posedge clk_150);
+            axi_timeout++;
+        end
+        @(posedge clk_150);
+        #1;
+        bridge_bready = 0;
+    endtask
+
+    task bridge_read(input [13:0] addr, output [31:0] data);
+        @(posedge clk_150);
+        #1;
+        bridge_araddr  = addr;
+        bridge_arvalid = 1;
+        bridge_rready  = 1;
+        axi_timeout = 0;
+        while (!bridge_arready && axi_timeout < AXI_TIMEOUT) begin
+            @(posedge clk_150);
+            axi_timeout++;
+        end
+        @(posedge clk_150);
+        #1;
+        bridge_arvalid = 0;
+        axi_timeout = 0;
+        while (!bridge_rvalid && axi_timeout < AXI_TIMEOUT) begin
+            @(posedge clk_150);
+            axi_timeout++;
+        end
+        data = bridge_rdata;
+        @(posedge clk_150);
+        #1;
+        bridge_rready = 0;
+    endtask
+
+    task bridge_pulse(input [13:0] addr);
+        bridge_write(addr, 32'h1);
+        bridge_write(addr, 32'h0);
+        repeat (5) @(posedge clk_150);
+    endtask
+
+    //--------------------------------------------------------------------------
+    // Main test sequence (mirrors ad9361_loopback/main.c)
+    //--------------------------------------------------------------------------
+    int pass_count = 0;
+    reg [31:0] rdata;
+
+    initial begin
+        $display("==============================================");
+        $display("  AD9361 Datapath -- Verilator TB (PolarFire)");
+        $display("  No axi_ad9361, no CPU (see header)");
+        $display("==============================================");
+
+        // Wait for reset + PLL lock
+        wait(system_resetn && clk_locked);
+        repeat (20) @(posedge clk_150);
+        $display("[%0t] PLL locked, resets released", $time);
+
+        // ================================================================
+        // Load 1024 TX samples
+        // ================================================================
+        $display("[%0t] Loading %0d TX samples ...", $time, NUM_COE_SAMPLES);
+        for (int i = 0; i < NUM_COE_SAMPLES; i++) begin
+            bridge_write(BRIDGE_TX_DATA_BASE + 14'(i * 4),
+                         {16'(i + 16'h1000), 16'(i)});
+        end
+
+        // ================================================================
+        // Pulse bridge enable, wait for RECEIVE state
+        // ================================================================
+        $display("[%0t] Pulsing bridge enable ...", $time);
+        bridge_pulse(BRIDGE_REG_ENABLE);
+
+        axi_timeout = 0;
+        while (axi_timeout < 100000) begin
+            bridge_read(BRIDGE_REG_STATE, rdata);
+            if (rdata == BRIDGE_STATE_RECEIVE) break;
+            axi_timeout++;
+        end
+        $display("[%0t] Bridge reached RECEIVE (after %0d polls)", $time, axi_timeout);
+
+        // ================================================================
+        // RX readback cycles
+        // ================================================================
+        $display("[%0t] Starting RX readback ...", $time);
+
+        for (int cycle = 0; cycle < NUM_READBACK_CYCLES; cycle++) begin
+            int nonzero, rx_ok;
+
+            // Wait for RX buffer full
+            rx_ok = 0;
+            for (int j = 0; j < 500000; j++) begin
+                bridge_read(BRIDGE_REG_RX_COUNT, rdata);
+                if (rdata >= (NUM_COE_SAMPLES - 1)) begin
+                    rx_ok = 1;
+                    break;
+                end
+            end
+
+            if (!rx_ok) begin
+                $display("[%0t] cycle %0d: TIMEOUT", $time, cycle);
+                continue;
+            end
+
+            nonzero = 0;
+            for (int k = 0; k < NUM_COE_SAMPLES; k++) begin
+                bridge_read(BRIDGE_RX_DATA_BASE + 14'(k * 4), rdata);
+                if (rdata != 32'h0) nonzero++;
+            end
+
+            $display("[%0t] cycle %0d: nonzero=%0d / %0d",
+                     $time, cycle, nonzero, NUM_COE_SAMPLES);
+
+            if (nonzero > 0) pass_count++;
+            bridge_pulse(BRIDGE_REG_RX_READ_DONE);
+        end
+
+        // ================================================================
+        // Result
+        // ================================================================
+        $display("");
+        $display("==============================================");
+        if (pass_count == NUM_READBACK_CYCLES)
+            $display("  TEST PASSED");
+        else
+            $display("  TEST FAILED (pass_count = %0d / %0d)",
+                     pass_count, NUM_READBACK_CYCLES);
+        $display("  ADC samples sent: %0d", adc_samples_sent);
+        $display("==============================================");
+        #1000;
+        $finish;
+    end
+
+    //--------------------------------------------------------------------------
+    // Watchdog
+    //--------------------------------------------------------------------------
+    initial begin
+        #5_000_000;  // 5 ms
+        $display("WATCHDOG: timeout (5 ms)");
+        $display("  pass_count = %0d / %0d", pass_count, NUM_READBACK_CYCLES);
+        $finish;
+    end
+
+endmodule

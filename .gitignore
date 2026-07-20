@@ -88,3 +88,6 @@ setups/*/sim/*.log
 # Vivado runtime files
 dfx_runtime.txt
 adi_ip/
+
+# Verilator build output
+obj_dir/
