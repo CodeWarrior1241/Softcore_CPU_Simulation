@@ -34,6 +34,10 @@
 #define BRIDGE_REG(off)  (*(volatile uint32_t *)(AXI_STREAMING_ADAPTER_BASE + (off)))
 
 /* ---------- ctrl_r registers (CPU writes) ---------- */
+/* One register map for BOTH platforms: the Microchip SmartHLS port of the
+ * bridge (src/axi_lite_to_streaming_adapter_microchip) decodes the same
+ * offsets as the Vitis HLS v3.0 s_axilite layout, so this driver is fully
+ * portable between the axau15 (Xilinx) and mpf300 (Microchip) systems. */
 #define BRIDGE_REG_ENABLE           0x0010
 #define BRIDGE_REG_RX_READ_DONE     0x0014
 #define BRIDGE_REG_RESET            0x0018
@@ -74,11 +78,22 @@ static inline void bridge_load_tx_data(const uint32_t *data, uint32_t num_sample
     }
 }
 
-/* Enable bridge: pulse enable, wait for RECEIVE state. */
+/* Enable bridge: assert enable, wait for RECEIVE state, then re-arm.
+ *
+ * The re-arm write (enable=0) is deliberately issued AFTER the state poll,
+ * not immediately after enable=1: the Microchip SmartHLS port of the
+ * bridge is a single pipeline that serves the TX burst ahead of AXI write
+ * DATA beats, so a write issued during SEND_AND_RECEIVE stalls for the
+ * whole 1024-word burst — far past the NEORV32 XBUS timeout, whose abort
+ * deasserts WVALID mid-handshake and wedges the write channel.  Reads are
+ * served throughout, so the state poll is safe.  On the Vitis bridge
+ * (independent ctrl_s_axi register file) both orderings behave
+ * identically, so this single sequence is portable across platforms. */
 static inline void bridge_enable_and_wait(void)
 {
-    bridge_ctrl_pulse(BRIDGE_REG_ENABLE);
+    BRIDGE_REG(BRIDGE_REG_ENABLE) = 1;
     while (BRIDGE_REG(BRIDGE_REG_STATE) != BRIDGE_STATE_RECEIVE) {}
+    BRIDGE_REG(BRIDGE_REG_ENABLE) = 0;
 }
 
 /* Read one word from RX sample buffer. */

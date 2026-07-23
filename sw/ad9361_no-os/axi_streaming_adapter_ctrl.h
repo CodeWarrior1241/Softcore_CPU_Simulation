@@ -95,20 +95,29 @@ static inline void bridge_reset(void)
  */
 static inline int bridge_enable(void)
 {
-    BRIDGE_REG(BRIDGE_REG_CTRL_ENABLE) = 1;
-    /* Wait for transition out of IDLE */
-    for (int i = 0; i < BRIDGE_POLL_TIMEOUT; i++) {
-        if (BRIDGE_REG(BRIDGE_REG_STATUS_STATE) != BRIDGE_STATE_IDLE)
-            break;
-    }
-    BRIDGE_REG(BRIDGE_REG_CTRL_ENABLE) = 0;
+    /* The enable=0 re-arm write is deliberately issued AFTER the TX burst
+     * completes (state reaches RECEIVE), not right after leaving IDLE: the
+     * Microchip SmartHLS port of the bridge is a single pipeline that
+     * serves the TX burst ahead of AXI write DATA beats, so a write issued
+     * during SEND_AND_RECEIVE stalls for the whole 1024-word burst and
+     * (with a small XBUS timeout) can be aborted mid-handshake, wedging
+     * the write channel.  Reads are served throughout, so the state polls
+     * are safe.  On the Vitis bridge (independent ctrl_s_axi register
+     * file) both orderings behave identically — this single sequence is
+     * portable across axau15 and mpf300. */
+    int reached_receive = 0;
 
+    BRIDGE_REG(BRIDGE_REG_CTRL_ENABLE) = 1;
     /* Wait for TX burst to complete (state reaches RECEIVE_QPSK_DATA) */
     for (int i = 0; i < BRIDGE_POLL_TIMEOUT; i++) {
-        if (BRIDGE_REG(BRIDGE_REG_STATUS_STATE) == BRIDGE_STATE_RECEIVE_QPSK_DATA)
-            return 1;
+        if (BRIDGE_REG(BRIDGE_REG_STATUS_STATE) == BRIDGE_STATE_RECEIVE_QPSK_DATA) {
+            reached_receive = 1;
+            break;
+        }
     }
-    return 0;
+    BRIDGE_REG(BRIDGE_REG_CTRL_ENABLE) = 0;   /* re-arm for the next pulse */
+
+    return reached_receive;
 }
 
 /*

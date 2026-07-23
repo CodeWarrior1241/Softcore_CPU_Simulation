@@ -121,6 +121,23 @@
 /**@}*/
 
 
+// Hardware multiplier self-test.  Volatile operands defeat constant folding
+// so an rv32im build emits real MUL/MULH/MULHU instructions — on the mpf300
+// build this exercises the pipelined fast multiplier (CPU_FAST_MUL_PIPELINE,
+// neorv32 PR #1603: an S_PIPE wait state adds one result-latency cycle, so a
+// wrong-phase valid_o would return garbage here).  An rv32i build (axau15)
+// compiles this to soft-multiply calls and still passes.
+static int mul_selftest(void) {
+  volatile int32_t  sa = -123456789, sb = 3579;
+  volatile uint32_t ua = 0xDEADBEEFu, ub = 0x1000193u;
+  int ok = 1;
+  ok &= ((int32_t)(sa * sb) == (int32_t)0x1F93DB69);            // MUL (low)
+  ok &= ((int32_t)(((int64_t)sa * sb) >> 32) == (int32_t)-103); // MULH
+  ok &= ((uint32_t)(ua * ub) == 0x7A83923Du);                   // MUL (low, unsigned)
+  ok &= ((uint32_t)(((uint64_t)ua * ub) >> 32) == 0xDEAF1Du);   // MULHU
+  return ok;
+}
+
 // Read 1024 RX samples, return count of non-zero samples.
 static int readback_rx(void) {
   int nonzero = 0;
@@ -288,7 +305,8 @@ int main(void) {
   // Signal result via GPIO — testbench auto-terminates on GPIO_RESULT_VALID
   // ==================================================================
 
-  int pass = (pass_count == (NUM_READBACK_CYCLES - 1)) && (post_wake_nonzero > 0);
+  int pass = (pass_count == (NUM_READBACK_CYCLES - 1)) && (post_wake_nonzero > 0)
+             && mul_selftest();
 
   if (pass) {
     neorv32_gpio_pin_set(GPIO_RESULT, 1);
