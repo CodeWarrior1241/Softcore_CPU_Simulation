@@ -940,6 +940,7 @@ package neorv32_package is
       -- Tuning Options --
       CPU_CONSTT_BR_EN    : boolean                        := false;
       CPU_FAST_MUL_EN     : boolean                        := false;
+      CPU_FAST_MUL_REG    : boolean                        := false;
       CPU_FAST_SHIFT_EN   : boolean                        := false;
       CPU_RF_ARCH_SEL     : natural range 0 to 3           := 0;
       -- Physical Memory Protection (PMP) --

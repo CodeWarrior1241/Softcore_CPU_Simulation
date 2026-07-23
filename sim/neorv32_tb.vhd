@@ -51,6 +51,7 @@ entity neorv32_tb is
     RISCV_ISA_Xcfu    : boolean                        := true;        -- custom (instr.) functions unit
     CPU_CONSTT_BR_EN  : boolean                        := false;       -- constant-time branches
     CPU_FAST_MUL_EN   : boolean                        := true;        -- use DSPs for M extension's multiplier
+    CPU_FAST_MUL_REG  : boolean                        := false;       -- add a pipeline register to the fast multiplier (override with nvc -g)
     CPU_FAST_SHIFT_EN : boolean                        := true;        -- use barrel shifter for shift operations
     IMEM_EN           : boolean                        := true;        -- implement processor-internal instruction memory
     IMEM_BASE         : std_ulogic_vector(31 downto 0) := x"00000000"; -- base address of processor-internal instruction memory (naturally aligned)
@@ -179,6 +180,7 @@ begin
     -- Extension Options --
     CPU_CONSTT_BR_EN    => CPU_CONSTT_BR_EN,
     CPU_FAST_MUL_EN     => CPU_FAST_MUL_EN,
+    CPU_FAST_MUL_REG => CPU_FAST_MUL_REG,
     CPU_FAST_SHIFT_EN   => CPU_FAST_SHIFT_EN,
     -- Physical Memory Protection (PMP) --
     PMP_NUM_REGIONS     => 5,
