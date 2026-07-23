@@ -22,10 +22,9 @@
 //     the clk_150/ecs_clk signal names are kept so the diff stays minimal.
 //   * clock generator: pf_ccc_behavioral (same shim port names) replaces
 //     clk_wiz_behavioral's Top_ECS_Clock_300MHz_0.
-//   * bridge register map: the SmartHLS port of the streaming adapter has
-//     its own map (regs 0x0000..0x0014, tx_data 0x0018, rx_data 0x1018 —
-//     see src/axi_lite_to_streaming_adapter_microchip/*.hpp); the Vitis
-//     offsets (0x10/0x14/0x20/0x28, 0x1000/0x2000) do not carry over.
+//   * bridge register map: identical to the Vitis layout (the SmartHLS
+//     port decodes the same offsets), so these parameters match the
+//     Xilinx TB.
 //
 //------------------------------------------------------------------------------
 // What IS NOT simulated (and why)
@@ -139,14 +138,14 @@ module tb_top;
     parameter STIM_VALID_HIGH_CYC   = 1;        // l_clk cycles valid=1
     parameter STIM_VALID_LOW_CYC    = 1;        // l_clk cycles valid=0 (data held)
 
-    // Bridge register offsets (14-bit addr) — SmartHLS port register map
-    // (src/axi_lite_to_streaming_adapter_microchip/axi_lite_to_streaming_adapter.hpp)
-    parameter [13:0] BRIDGE_REG_ENABLE       = 14'h0000;
-    parameter [13:0] BRIDGE_REG_RX_READ_DONE = 14'h0004;
-    parameter [13:0] BRIDGE_REG_STATE        = 14'h000C;
-    parameter [13:0] BRIDGE_REG_RX_COUNT     = 14'h0014;
-    parameter [13:0] BRIDGE_TX_DATA_BASE     = 14'h0018;
-    parameter [13:0] BRIDGE_RX_DATA_BASE     = 14'h1018;
+    // Bridge register offsets (14-bit addr) — the SmartHLS port decodes the
+    // SAME map as the Vitis IP (identical to the Xilinx TB's parameters)
+    parameter [13:0] BRIDGE_REG_ENABLE       = 14'h0010;
+    parameter [13:0] BRIDGE_REG_RX_READ_DONE = 14'h0014;
+    parameter [13:0] BRIDGE_REG_STATE        = 14'h0020;
+    parameter [13:0] BRIDGE_REG_RX_COUNT     = 14'h0028;
+    parameter [13:0] BRIDGE_TX_DATA_BASE     = 14'h1000;
+    parameter [13:0] BRIDGE_RX_DATA_BASE     = 14'h2000;
     parameter [31:0] BRIDGE_STATE_RECEIVE    = 32'd3;
 
     // AXI handshake timeout, in fabric-clock cycles. The Xilinx TB used 200;

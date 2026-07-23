@@ -200,7 +200,8 @@ module datapath_top (
     //--------------------------------------------------------------------------
     // TB AXI-Lite -> SmartHLS AXI4 subset: zero-extended address,
     // single-beat burst fields, WLAST high, RLAST consumed (the SmartHLS
-    // core decodes the low address bits, so plain offsets work — proven by
+    // core decodes its full address, so it must be given window offsets;
+    // the map itself is identical to the Vitis layout — proven by
     // the unit TB in src/axi_lite_to_streaming_adapter_microchip/verilator_sim).
     wire sa_ready, sa_finish;
     wire sa_r_last;
