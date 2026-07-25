@@ -1,0 +1,16 @@
+# QuestaSim compiled libraries (generated)
+work/
+neorv32/
+polarfire/
+
+# Simulation run artifacts (see clean_all in run_sim.sh)
+transcript
+*.wlf
+*.log
+*.vstf
+modelsim.ini
+
+# Staged/generated inputs (firmware image + stimulus copied in by run_sim.sh)
+neorv32_imem_image.vhd
+qpsk_bram_data.hex
+*.mem
