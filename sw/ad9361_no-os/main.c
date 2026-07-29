@@ -37,6 +37,8 @@
 #define CMD_PINCTL_OFF      "pinctl_off"
 #define CMD_LOOPBACK_ON     "loopback_on"
 #define CMD_LOOPBACK_OFF    "loopback_off"
+#define CMD_CLKSEL_ON       "clksel_on"      /* invert TX FB_CLK (mid-eye A/B test) */
+#define CMD_CLKSEL_OFF      "clksel_off"     /* FB_CLK back to edge-aligned default */
 #define CMD_SET_TX_ATTEN    "set_tx_atten"   /* + integer mdB  (R4 sweep) */
 #define CMD_SET_RX_GAIN     "set_rx_gain"    /* + integer dB   (R4 sweep) */
 #define CMD_GET_RSSI        "get_rssi"       /* compact RSSI + gain line */
@@ -50,14 +52,26 @@
 #define RESP_RF_DISABLED    "rf_disabled\n"
 #define RESP_SNAPSHOT       "snapshot_enabled\n"
 
-/* ---------- axi_ad9361 register access (AU15P AXI domain = 150 MHz) ---------- */
-#define AXI_CLK_HZ                  150000000UL
+/* ---------- axi_ad9361 register access ---------- */
+/* up_clock_mon counts DATA_CLK ticks against the AXI/up_clk domain, which in
+ * BOTH builds is the CPU clock domain (axau15: 150 MHz, mpf300: 125 MHz PF_CCC
+ * fabric clock). Read it from SYSINFO at runtime so the single shared image
+ * reports l_clk correctly on either board (a 150 MHz hardcode made the mpf300
+ * report 61.44 MHz * 150/125 = 73.7 MHz). */
+#define AXI_CLK_HZ                  ((uint32_t)NEORV32_SYSINFO->CLK)
 #define AD9361_REG(off)             (*(volatile uint32_t *)(AXI_AD9361_BASE + (off)))
 
-/* IDELAYCTRL reference frequency feeding the IDELAYE3 primitives in axi_ad9361.
- * MUST stay in sync with CONFIG.DELAY_REFCLK_FREQUENCY in
+/* The shared image tells the two platforms apart by the CPU clock. */
+#define PLATFORM_IS_XILINX()        (AXI_CLK_HZ > 140000000UL)
+
+/* IDELAYCTRL reference frequency feeding the IDELAYE3 primitives in axi_ad9361
+ * -- Xilinx (au15p/axau15) build ONLY. MUST stay in sync with
+ * CONFIG.DELAY_REFCLK_FREQUENCY in
  * deps/hdl/projects/fmcomms2/au15p/build_all.tcl (the axi_ad9361 IP cell).
- * Used only by dump_adc_status() to print the LVDS tap-resolution margin. */
+ * Used only by dump_adc_status() to print the LVDS tap-resolution margin.
+ * The PolarFire (mpf300) port has no IDELAY primitives (static SDC timing;
+ * delay_clk is just the 125 MHz fabric clock), so the tap math is meaningless
+ * there and dump_adc_status() skips it. */
 #define DELAY_REFCLK_HZ             300000000UL
 
 /* ADC common registers (cf. up_adc_common.v decode at 7'h10..7'h17) */
@@ -79,6 +93,13 @@
 #define DAC_REG_CLK_FREQ            0x4054
 #define DAC_REG_CLK_RATIO           0x4058
 #define DAC_REG_STATUS              0x405C
+/* up_dac_common word 7'h18, bit 0 (dac_clksel): swaps the DDR bit order of
+ * the transmitted FB_CLK, i.e. inverts it by 180 deg. On the PolarFire port
+ * the fabric-emulated DDR outputs launch FB_CLK edge-aligned with the TX
+ * data transitions (dac_clksel=0), so the AD9361 samples at the eye edge;
+ * dac_clksel=1 moves the FB_CLK edges half a UI to mid-eye. Runtime A/B
+ * knob for the TX-interface timing (see clksel_on/clksel_off commands). */
+#define DAC_REG_CLKSEL              0x4060
 
 /* up_clock_mon counts d_clk ticks per 65536 up_clk ticks */
 #define CLK_MON_WINDOW              65536UL
@@ -250,8 +271,12 @@ static void dump_adc_status(void)
 	 *   sw step    = 16 * fine tap   (ADI wrapper exposes only upper 5 of 9 bits)
 	 *   UI         = 1 / (2 * l_clk) (LVDS DDR: 1 bit per half-cycle of DATA_CLK)
 	 *   taps_in_UI = UI / sw_step    (= 16ths how many software steps fit per bit)
-	 * Want > 3 for dig_tune to find a stable lock. */
-	if (l_clk > 0) {
+	 * Want > 3 for dig_tune to find a stable lock.
+	 * Xilinx build only: PolarFire has no IDELAY primitives, so on mpf300
+	 * this math describes nothing -- print the static-timing note instead. */
+	if (!PLATFORM_IS_XILINX()) {
+		neorv32_uart0_puts("  delay: static SDC timing (PolarFire; no IDELAY primitives, tap metrics n/a)\n");
+	} else if (l_clk > 0) {
 		uint32_t fine_tap_ps = (uint32_t)(1000000000000ULL /
 						   ((uint64_t)DELAY_REFCLK_HZ * 32ULL));
 		uint32_t sw_step_ps  = fine_tap_ps * 16U;
@@ -1462,6 +1487,18 @@ int main(void)
 			int32_t r = ad9361_bist_loopback(phy, 0);
 			neorv32_uart0_printf("loopback_off mode=%d ret=%d\n",
 					     (int)phy->bist_loopback_mode, (int)r);
+
+		} else if (strcmp_cmd(cmd_buffer, CMD_CLKSEL_ON)) {
+			/* Invert TX FB_CLK: chip samples TX data mid-eye instead of at
+			 * the transitions (see DAC_REG_CLKSEL comment). */
+			AD9361_REG(DAC_REG_CLKSEL) = 1;
+			neorv32_uart0_printf("clksel_on CLKSEL=0x%x (FB_CLK inverted, mid-eye)\n",
+					     (unsigned)AD9361_REG(DAC_REG_CLKSEL));
+
+		} else if (strcmp_cmd(cmd_buffer, CMD_CLKSEL_OFF)) {
+			AD9361_REG(DAC_REG_CLKSEL) = 0;
+			neorv32_uart0_printf("clksel_off CLKSEL=0x%x (FB_CLK edge-aligned default)\n",
+					     (unsigned)AD9361_REG(DAC_REG_CLKSEL));
 
 		} else if (parse_cmd_arg(cmd_buffer, CMD_SET_TX_ATTEN, &cmd_arg)) {
 			/* R4: runtime TX attenuation (mdB) for the atten/gain sweep. */
