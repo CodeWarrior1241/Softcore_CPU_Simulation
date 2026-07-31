@@ -1476,7 +1476,13 @@ int main(void)
 					     (unsigned)(cfg & 0xFF));
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_LOOPBACK_ON)) {
-			/* AD9361 internal TX->RX baseband loopback (RF bypassed). */
+			/* AD9361 internal TX->RX baseband loopback (RF bypassed).
+			 *
+			 * The BB loopback path bypasses the RX analog DC-offset /
+			 * gain handling. Treat loopback
+			 * EVM as qualitative only; use hold_bist + get_valid_rate
+			 * (PN lock) as the quantitative interface-integrity metric
+			 * and RF EVM as the end-to-end quality metric. */
 			ad9361_bist_prbs(phy, BIST_DISABLE);
 			int32_t r = ad9361_bist_loopback(phy, 1);
 			neorv32_uart0_printf("loopback_on mode=%d ret=%d\n",
