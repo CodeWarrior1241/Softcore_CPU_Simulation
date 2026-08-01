@@ -114,8 +114,15 @@ fi
 # The Vivado IP packaging creates snapshots under ipshared/ which go stale
 # when firmware is rebuilt. Copy the current image so the simulation always
 # uses the latest build.
+# Prefer the platform-correct prebuilt (sw/ad9361_loopback, Xilinx bridge
+# map, fits the BD's 32KB IMEM) — rtl/core may hold an image for another
+# platform (e.g. the MPF300 SmartHLS build, ~108KB, which overflows IMEM
+# and leaves the CPU silent). Fall back to rtl/core if no prebuilt exists.
 NEORV32_HOME="$(cd "../../.." && pwd)"
-IMEM_SRC="$NEORV32_HOME/rtl/core/neorv32_imem_image.vhd"
+IMEM_SRC="$NEORV32_HOME/sw/ad9361_loopback/neorv32_imem_image.vhd"
+if [ ! -f "$IMEM_SRC" ]; then
+    IMEM_SRC="$NEORV32_HOME/rtl/core/neorv32_imem_image.vhd"
+fi
 # Find ipshared directories dynamically (hash changes on each project rebuild)
 IPSHARED_DIR=$(find ../NEORV32_Simulation.ip_user_files/bd/Top/ipshared -name "neorv32_imem_image.vhd" -printf '%h\n' 2>/dev/null | head -1)
 IPSHARED_GEN=$(find ../NEORV32_Simulation.gen/sources_1/bd/Top/ipshared -name "neorv32_imem_image.vhd" -printf '%h\n' 2>/dev/null | head -1)

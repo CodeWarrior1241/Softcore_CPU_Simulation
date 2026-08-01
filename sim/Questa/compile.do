@@ -95,6 +95,7 @@ vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_neoled.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_gptmr.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_onewire.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_slink.vhd
+vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_smc.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_tracer.vhd
 vcom {*}$VCOM_OPTS ../../rtl/core/neorv32_sysinfo.vhd
 

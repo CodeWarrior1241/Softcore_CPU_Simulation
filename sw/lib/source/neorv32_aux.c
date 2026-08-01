@@ -362,8 +362,6 @@ void neorv32_aux_print_hw_config(void) {
   uint32_t mxisah = neorv32_cpu_csr_read(CSR_MXISAH);
   if (mxisa  & (1<<CSR_MXISA_ZAAMO))     { neorv32_uart0_printf("Zaamo ");     }
   if (mxisa  & (1<<CSR_MXISA_ZALRSC))    { neorv32_uart0_printf("Zalrsc ");    }
-  if (mxisa  & (1<<CSR_MXISA_ZCA))       { neorv32_uart0_printf("Zca ");       }
-  if (mxisa  & (1<<CSR_MXISA_ZCB))       { neorv32_uart0_printf("Zcb ");       }
   if (mxisa  & (1<<CSR_MXISA_ZBA))       { neorv32_uart0_printf("Zba ");       }
   if (mxisa  & (1<<CSR_MXISA_ZBB))       { neorv32_uart0_printf("Zbb ");       }
   if (mxisah & (1<<CSR_MXISAH_ZBC))      { neorv32_uart0_printf("Zbc ");       }
@@ -371,6 +369,9 @@ void neorv32_aux_print_hw_config(void) {
   if (mxisa  & (1<<CSR_MXISA_ZBKC))      { neorv32_uart0_printf("Zbkc ");      }
   if (mxisa  & (1<<CSR_MXISA_ZBKX))      { neorv32_uart0_printf("Zbkx ");      }
   if (mxisa  & (1<<CSR_MXISA_ZBS))       { neorv32_uart0_printf("Zbs ");       }
+  if (mxisa  & (1<<CSR_MXISA_ZCA))       { neorv32_uart0_printf("Zca ");       }
+  if (mxisa  & (1<<CSR_MXISA_ZCB))       { neorv32_uart0_printf("Zcb ");       }
+  if (mxisah & (1<<CSR_MXISAH_ZCMOP))    { neorv32_uart0_printf("Zcmop ");     }
   if (mxisa  & (1<<CSR_MXISA_ZFINX))     { neorv32_uart0_printf("Zfinx ");     }
   if (mxisa  & (1<<CSR_MXISA_ZIBI))      { neorv32_uart0_printf("Zibi ");      }
   if (mxisa  & (1<<CSR_MXISA_ZICNTR))    { neorv32_uart0_printf("Zicntr ");    }
@@ -503,10 +504,18 @@ void neorv32_aux_print_hw_config(void) {
     neorv32_uart0_printf("none");
   }
 
+  // serial memory controller
+  neorv32_uart0_printf("Serial MEM ctrl.:    ");
+  if (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_SMC)) {
+    neorv32_uart0_printf("enabled, memory base: 0x%x\n", neorv32_smc_get_baseaddr());
+  }
+  else {
+    neorv32_uart0_printf("none\n");
+  }
+
   // external bus interface
   neorv32_uart0_printf("Ext. bus interface:  ");
-  tmp = NEORV32_SYSINFO->SOC;
-  if (tmp & (1 << SYSINFO_SOC_XBUS)) {
+  if (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_XBUS)) {
     neorv32_uart0_printf("enabled");
   }
   else {

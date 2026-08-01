@@ -12,6 +12,19 @@ This directory contains scripts for simulating the NEORV32 RISC-V processor usin
 - `vsim` command available in PATH
 - Python 3 with matplotlib/numpy (optional, for constellation plots)
 
+## Default Application
+
+The testbench is configured to run the **snapshot_handler** application (QPSK
+IQ sample capture via UART). Build and install it before running:
+
+```bash
+cd sw/snapshot_handler
+make clean_all exe
+make install
+```
+
+This compiles the application and installs `neorv32_imem_image.vhd` to `rtl/core/`.
+
 ## Changing the Application Program
 
 The simulation runs whatever program is compiled into `rtl/core/neorv32_imem_image.vhd`. To simulate a different program:
@@ -85,12 +98,12 @@ chmod +x run_sim.sh
 ## Command Line Options
 
 ```
-run_sim [-batch|-gui] [-time <simulation_time>]
+run_sim [--batch|--gui] [--time <simulation_time>]
 
 Options:
-  -batch    Run in batch mode (no GUI)
-  -gui      Run in GUI mode (default)
-  -time     Set simulation time (default: 10ms)
+  --batch    Run in batch mode (no GUI)
+  --gui      Run in GUI mode (default)
+  --time     Set simulation time (default: 500ms)
 ```
 
 ### Examples

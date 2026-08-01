@@ -20,7 +20,7 @@ package neorv32_package is
 
   -- Architecture Constants -----------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
-  constant hw_version_c  : std_ulogic_vector(31 downto 0) := x"01130200"; -- hardware version
+  constant hw_version_c  : std_ulogic_vector(31 downto 0) := x"01130300"; -- hardware version
   constant int_bus_tmo_c : natural := 16; -- internal bus timeout window; has to be a power of two
   constant alu_cp_tmo_c  : natural := 9;  -- log2 of max ALU co-processor execution cycles
 
@@ -58,7 +58,7 @@ package neorv32_package is
   constant base_io_slink_c   : std_ulogic_vector(31 downto 0) := x"ffec0000";
   constant base_io_dma_c     : std_ulogic_vector(31 downto 0) := x"ffed0000";
 --constant base_io_???_c     : std_ulogic_vector(31 downto 0) := x"ffee0000"; -- reserved
---constant base_io_???_c     : std_ulogic_vector(31 downto 0) := x"ffef0000"; -- reserved
+  constant base_io_smc_c     : std_ulogic_vector(31 downto 0) := x"ffef0000";
   constant base_io_pwm_c     : std_ulogic_vector(31 downto 0) := x"fff00000";
   constant base_io_gptmr_c   : std_ulogic_vector(31 downto 0) := x"fff10000";
   constant base_io_onewire_c : std_ulogic_vector(31 downto 0) := x"fff20000";
@@ -923,6 +923,7 @@ package neorv32_package is
       RISCV_ISA_Zbkx      : boolean                        := false;
       RISCV_ISA_Zbs       : boolean                        := false;
       RISCV_ISA_Zcb       : boolean                        := false;
+      RISCV_ISA_Zcmop     : boolean                        := false;
       RISCV_ISA_Zfinx     : boolean                        := false;
       RISCV_ISA_Zibi      : boolean                        := false;
       RISCV_ISA_Zicntr    : boolean                        := false;
@@ -969,6 +970,9 @@ package neorv32_package is
       CACHE_BLOCK_SIZE    : natural range 4 to 1024        := 64;
       CACHE_BURSTS_EN     : boolean                        := true;
       CACHE_UC_BASE       : std_ulogic_vector(31 downto 0) := x"F0000000";
+      -- Serial Memory Controller (SMC) --
+      SMC_EN              : boolean                        := false;
+      SMC_BASE            : std_ulogic_vector(31 downto 0) := x"E0000000";
       -- External Bus Interface (XBUS) --
       XBUS_EN             : boolean                        := false;
       XBUS_TIMEOUT        : natural                        := 2048;
@@ -1042,6 +1046,12 @@ package neorv32_package is
       jtag_tdi_i     : in  std_ulogic := 'L';
       jtag_tdo_o     : out std_ulogic;
       jtag_tms_i     : in  std_ulogic := 'L';
+      -- Serial memory controller interface (available if SMC_EN = true) --
+      smc_ioen_o     : out std_ulogic;
+      smc_sck_o      : out std_ulogic;
+      smc_csn_o      : out std_ulogic_vector(1 downto 0);
+      smc_sdo_o      : out std_ulogic;
+      smc_sdi_i      : in  std_ulogic := 'L';
       -- External bus interface (available if XBUS_EN = true) --
       xbus_adr_o     : out std_ulogic_vector(31 downto 0);
       xbus_dat_o     : out std_ulogic_vector(31 downto 0);
@@ -1054,9 +1064,9 @@ package neorv32_package is
       xbus_dat_i     : in  std_ulogic_vector(31 downto 0) := (others => 'L');
       xbus_ack_i     : in  std_ulogic := 'L';
       xbus_err_i     : in  std_ulogic := 'L';
-      -- Stream Link Interface (available if IO_SLINK_EN = true) --
+      -- Stream link interface (available if IO_SLINK_EN = true) --
       slink_rx_dat_i : in  std_ulogic_vector(31 downto 0) := (others => 'L');
-      slink_rx_src_i : in  std_ulogic_vector(3 downto 0) := (others => 'L');
+      slink_rx_src_i : in  std_ulogic_vector(3 downto 0)  := (others => 'L');
       slink_rx_val_i : in  std_ulogic := 'L';
       slink_rx_lst_i : in  std_ulogic := 'L';
       slink_rx_rdy_o : out std_ulogic;
@@ -1069,12 +1079,12 @@ package neorv32_package is
       gpio_dir_o     : out std_ulogic_vector(31 downto 0);
       gpio_o         : out std_ulogic_vector(31 downto 0);
       gpio_i         : in  std_ulogic_vector(31 downto 0) := (others => 'L');
-      -- primary UART0 (available if IO_UART0_EN = true) --
+      -- Primary UART0 (available if IO_UART0_EN = true) --
       uart0_txd_o    : out std_ulogic;
       uart0_rxd_i    : in  std_ulogic := 'L';
       uart0_rtsn_o   : out std_ulogic;
       uart0_ctsn_i   : in  std_ulogic := 'L';
-      -- secondary UART1 (available if IO_UART1_EN = true) --
+      -- Secondary UART1 (available if IO_UART1_EN = true) --
       uart1_txd_o    : out std_ulogic;
       uart1_rxd_i    : in  std_ulogic := 'L'; -- UART1 receive data
       uart1_rtsn_o   : out std_ulogic;
@@ -1117,7 +1127,7 @@ package neorv32_package is
     );
   end component;
 
-end package neorv32_package;
+end package;
 
 package body neorv32_package is
 
@@ -1135,7 +1145,7 @@ package body neorv32_package is
       end if;
     end loop;
     return 32; -- fallback
-  end function index_size_f;
+  end function;
 
   -- Conditional select natural -------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -1146,7 +1156,7 @@ package body neorv32_package is
     else
       return f;
     end if;
-  end function sel_natural_f;
+  end function;
 
   -- Conditional select std_ulogic_vector ---------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -1157,7 +1167,7 @@ package body neorv32_package is
     else
       return f;
     end if;
-  end function sel_suv_f;
+  end function;
 
   -- Conditional select string --------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -1168,7 +1178,7 @@ package body neorv32_package is
     else
       return f;
     end if;
-  end function sel_string_f;
+  end function;
 
   -- Convert boolean to std_ulogic ----------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -1179,7 +1189,7 @@ package body neorv32_package is
     else
       return '0';
     end if;
-  end function bool_to_ulogic_f;
+  end function;
 
   -- OR all bits ----------------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -1191,7 +1201,7 @@ package body neorv32_package is
       v := v or d(i);
     end loop;
     return v;
-  end function or_reduce_f;
+  end function;
 
   -- AND all bits ---------------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -1203,7 +1213,7 @@ package body neorv32_package is
       v := v and d(i);
     end loop;
     return v;
-  end function and_reduce_f;
+  end function;
 
   -- XOR all bits ---------------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -1215,7 +1225,7 @@ package body neorv32_package is
       v := v xor d(i);
     end loop;
     return v;
-  end function xor_reduce_f;
+  end function;
 
   -- Convert 4-bit std_ulogic_vector to lowercase hex char ----------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -1231,7 +1241,7 @@ package body neorv32_package is
     else
       return hex_v(to_integer(unsigned(d)) + 1);
     end if;
-  end function to_hexchar_f;
+  end function;
 
   -- Bit reversal ---------------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -1242,7 +1252,7 @@ package body neorv32_package is
       r((d'length-1)-i) := d(d'low + i);
     end loop;
     return r;
-  end function bit_rev_f;
+  end function;
 
   -- Replicate bit --------------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -1251,7 +1261,7 @@ package body neorv32_package is
   begin
     v := (others => d);
     return v;
-  end function replicate_f;
+  end function;
 
   -- Convert to hex string ------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -1262,6 +1272,6 @@ package body neorv32_package is
       v(i+1) := to_hexchar_f(d(d'high-i*4 downto (d'high-i*4)-3));
     end loop;
     return v;
-  end function to_hexstring_f;
+  end function;
 
-end package body neorv32_package;
+end package body;

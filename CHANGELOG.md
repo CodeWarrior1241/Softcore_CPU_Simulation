@@ -29,6 +29,16 @@ mimpid = 0x01040312 -> Version 01.04.03.12 -> v1.4.3.12
 
 | Date | Version | Comment | Ticket |
 |:----:|:-------:|:--------|:------:|
+| 24.06.2026 | [**1.13.3**](https://github.com/stnolting/neorv32/releases/tag/v1.13.3) | :rocket: **New release** | |
+| 23.07.2026 | 1.13.2.9 | :sparkles: add optional `CPU_FAST_MUL_REG` generic: pipeline register for the fast multiplier (shortens critical path on narrow-DSP FPGAs; +1 multiply latency cycle) | [#1603](https://github.com/stnolting/neorv32/pull/1603) |
+| 20.07.2026 | 1.13.2.8 | comprehensive VHDL coding style edits | [#1602](https://github.com/stnolting/neorv32/pull/1602) |
+| 17.07.2026 | 1.13.2.7 | :sparkles: add new SoC module: serial memory controller (SMC) to attach external serial memory (PSRAM or flash; supports XIP) | [#1599](https://github.com/stnolting/neorv32/pull/1599) |
+| 11.07.2026 | 1.13.2.6 | :bug: fix another RVFI memory address & data signal alignment bug | [#1597](https://github.com/stnolting/neorv32/pull/1597) |
+| 03.07.2026 | 1.13.2.5 | :sparkles: add support for RISC-V `Zcmop` ISA extension (compressed may-be-operations) | [#1596](https://github.com/stnolting/neorv32/pull/1596) |
+| 03.07.2026 | 1.13.2.4 | :bug: fix further illegal instruction detection loopholes in `Zfinx` ISA extension (classify + compare)| [#](https://github.com/stnolting/neorv32/pull/1595) |
+| 03.07.2026 | 1.13.2.3 | minor rtl edits and cleanups | [#1594](https://github.com/stnolting/neorv32/pull/1594) |
+| 01.07.2026 | 1.13.2.2 | :bug: fix illegal instruction detection loopholes in `Ziimop` and `Zfinx` ISA extensions | [#1590](https://github.com/stnolting/neorv32/pull/1590) |
+| 01.07.2026 | 1.13.2.1 | :bug: fix RVFI memory address & data signal alignment | [#1585](https://github.com/stnolting/neorv32/pull/1585) |
 | 16.06.2026 | [**1.13.2**](https://github.com/stnolting/neorv32/releases/tag/v1.13.2) | :rocket: **New release** | |
 | 15.06.2026 | 1.13.1.9 | remove `mhpmevent*h` CSRs that do not exist on RV32 without `Sscofpmf` | [#1575](https://github.com/stnolting/neorv32/pull/1575) |
 | 14.06.2026 | 1.13.1.8 | close (the last) RVC illegal instruction detection loophole; further shrink bootloader image size; add defaults for CPU-top generics | [#1574](https://github.com/stnolting/neorv32/pull/1574) |

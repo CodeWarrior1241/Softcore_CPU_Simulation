@@ -57,7 +57,7 @@ entity neorv32_cpu_alu is
     -- status --
     done_o : out std_ulogic -- co-processor operation done?
   );
-end neorv32_cpu_alu;
+end entity;
 
 architecture neorv32_cpu_alu_rtl of neorv32_cpu_alu is
 
@@ -71,7 +71,7 @@ architecture neorv32_cpu_alu_rtl of neorv32_cpu_alu is
       imm_v := replicate_f('0', 27) & sel;
     end if;
     return bool_to_ulogic_f(imm_v = cmp);
-  end function zibi_cmp_f;
+  end function;
 
   -- wiring --
   signal opa, opb, cp_res : std_ulogic_vector(31 downto 0);
@@ -120,9 +120,9 @@ begin
       when alu_op_xor_c  => res_o <= opb xor rs1_i;
       when alu_op_or_c   => res_o <= opb or  rs1_i;
       when alu_op_and_c  => res_o <= opb and rs1_i;
-      when others        => res_o <= (others => '0');
+      when others        => res_o <= (others => 'X'); -- undefined
     end case;
-  end process alu_core;
+  end process;
 
   -- operands --
   opa   <= ctrl_i.pc_cur  when (ctrl_i.alu_opa_mux = '1') else rs1_i;
@@ -311,7 +311,7 @@ begin
           cp_result(4) <= (others => '0');
         end if;
       end if;
-    end process cfu_proxy;
+    end process;
     cp_valid(4) <= cfu_done and (ctrl_i.alu_cp_cfu or cfu_busy);
   end generate;
 
@@ -382,4 +382,4 @@ begin
     cp_valid(6)  <= '0';
   end generate;
 
-end neorv32_cpu_alu_rtl;
+end architecture;

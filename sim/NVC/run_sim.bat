@@ -161,6 +161,7 @@ REM Peripherals
 %NVC% --std=2008 --work=neorv32:%WORK_DIR%/neorv32 -a ../../rtl/core/neorv32_gptmr.vhd
 %NVC% --std=2008 --work=neorv32:%WORK_DIR%/neorv32 -a ../../rtl/core/neorv32_onewire.vhd
 %NVC% --std=2008 --work=neorv32:%WORK_DIR%/neorv32 -a ../../rtl/core/neorv32_slink.vhd
+%NVC% --std=2008 --work=neorv32:%WORK_DIR%/neorv32 -a ../../rtl/core/neorv32_smc.vhd
 %NVC% --std=2008 --work=neorv32:%WORK_DIR%/neorv32 -a ../../rtl/core/neorv32_tracer.vhd
 %NVC% --std=2008 --work=neorv32:%WORK_DIR%/neorv32 -a ../../rtl/core/neorv32_sysinfo.vhd
 if errorlevel 1 goto error

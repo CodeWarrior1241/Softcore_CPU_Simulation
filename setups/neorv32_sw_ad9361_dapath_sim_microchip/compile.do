@@ -86,7 +86,13 @@ if {![file exists $local_image]} {
     error "Firmware IMEM image not found: $local_image\n  Run run_sim.sh (builds it), or:\n  cd $neorv32_home/sw/ad9361_loopback && make SMARTHLS_BRIDGE_MAP=1 MARCH=rv32im_zicsr_zifencei clean_all image && cp neorv32_imem_image.vhd $sim_dir/"
 }
 
-set fl [open "$neorv32_home/rtl/file_list_soc.f" r]
+# file_list_soc.f was renamed to file_list_core.f upstream (PR #1611,
+# post-v1.13.3); accept either name so the sim survives the bump
+set fl_path "$neorv32_home/rtl/file_list_soc.f"
+if {![file exists $fl_path]} {
+    set fl_path "$neorv32_home/rtl/file_list_core.f"
+}
+set fl [open $fl_path r]
 while {[gets $fl line] >= 0} {
     set line [string trim $line]
     if {$line eq ""} { continue }

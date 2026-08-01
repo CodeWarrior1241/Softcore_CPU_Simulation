@@ -30,7 +30,7 @@ entity neorv32_bus_switch is
     x_req_o : out bus_req_t;  -- device port request bus
     x_rsp_i : in  bus_rsp_t   -- device port response bus
   );
-end neorv32_bus_switch;
+end entity;
 
 architecture neorv32_bus_switch_rtl of neorv32_bus_switch is
 
@@ -66,7 +66,7 @@ begin
         b_req <= '1';
       end if;
     end if;
-  end process arbiter_sync;
+  end process;
 
   -- Access Arbiter Comb --------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -97,7 +97,7 @@ begin
           state_nxt <= S_IDLE;
         end if;
 
-      when others => -- wait for requests
+      when S_IDLE => -- wait for requests
       -- ------------------------------------------------------------
         lock_nxt <= b_req_i.lock & a_req_i.lock;
         if (sel_q = '1') or (not ROUND_ROBIN_EN) then
@@ -123,7 +123,7 @@ begin
         end if;
 
     end case;
-  end process arbiter_fsm;
+  end process;
 
   -- Request Switch -------------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -150,7 +150,7 @@ begin
   b_rsp_o.err  <= x_rsp_i.err when (sel_q = '1') else '0';
   b_rsp_o.data <= x_rsp_i.data;
 
-end neorv32_bus_switch_rtl;
+end architecture;
 
 
 -- ================================================================================ --
@@ -184,7 +184,7 @@ entity neorv32_bus_reg is
     device_req_o : out bus_req_t; -- device request
     device_rsp_i : in  bus_rsp_t  -- device response
   );
-end neorv32_bus_reg;
+end entity;
 
 architecture neorv32_bus_reg_rtl of neorv32_bus_reg is
 
@@ -207,7 +207,7 @@ begin
         device_req_o.burst <= host_req_i.burst;
         device_req_o.lock  <= host_req_i.lock;
       end if;
-    end process request_reg;
+    end process;
   end generate;
 
   request_reg_disabled:
@@ -226,7 +226,7 @@ begin
       elsif rising_edge(clk_i) then
         host_rsp_o <= device_rsp_i;
       end if;
-    end process response_reg;
+    end process;
   end generate;
 
   response_reg_disabled:
@@ -234,17 +234,18 @@ begin
     host_rsp_o <= device_rsp_i;
   end generate;
 
-end neorv32_bus_reg_rtl;
+end architecture;
 
 
 -- ================================================================================ --
--- NEORV32 SoC - Processor Bus Infrastructure: Section Gateway                      --
+-- NEORV32 SoC - Processor Bus Infrastructure: Bus Gateway                          --
 -- -------------------------------------------------------------------------------- --
--- Bus gateway to distribute accesses to 3 non-overlapping address sub-spaces       --
+-- Bus gateway to distribute accesses to 4 non-overlapping address sub-spaces       --
 -- (A to C). Note that the sub-spaces have to be aligned to their individual sizes. --
 -- All accesses that do not match any of these sections are redirected to the X     --
 -- port. The gateway-internal bus monitor ensures that ALL accesses are completed   --
--- within a bound time window. Otherwise, a bus error exception is raised.          --
+-- within a port-specific bound time window (*_TMO). Otherwise, a bus error         --
+-- exception is raised.                                                             --
 -- -------------------------------------------------------------------------------- --
 -- The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              --
 -- Copyright (c) NEORV32 contributors.                                              --
@@ -262,22 +263,29 @@ use neorv32.neorv32_package.all;
 
 entity neorv32_bus_gateway is
   generic (
-    TMO_INT : natural; -- internal bus timeout cycles (0 = timeout disabled)
-    TMO_EXT : natural; -- external bus timeout cycles (0 = timeout disabled)
-    -- port A --
-    A_EN    : boolean; -- port enable
-    A_BASE  : std_ulogic_vector(31 downto 0); -- port address space base address
-    A_SIZE  : natural; -- port address space size in bytes (power of two), aligned to size
-    -- port B --
+    -- device port A --
+    A_EN    : boolean;                        -- port enable
+    A_BASE  : std_ulogic_vector(31 downto 0); -- port address space base address (aligned to size)
+    A_SIZE  : natural;                        -- port address space size in bytes (power of two)
+    A_TMO   : natural;                        -- port access timeout (power of two, 0 = disabled)
+    -- device port B --
     B_EN    : boolean;
     B_BASE  : std_ulogic_vector(31 downto 0);
     B_SIZE  : natural;
-    -- port C --
+    B_TMO   : natural;
+    -- device port C --
     C_EN    : boolean;
     C_BASE  : std_ulogic_vector(31 downto 0);
     C_SIZE  : natural;
-    -- port X (the void) --
-    X_EN    : boolean
+    C_TMO   : natural;
+    -- device port D --
+    D_EN    : boolean;
+    D_BASE  : std_ulogic_vector(31 downto 0);
+    D_SIZE  : natural;
+    D_TMO   : natural;
+    -- device port X (the void) --
+    X_EN    : boolean;
+    X_TMO   : natural
   );
   port (
     -- global control --
@@ -287,17 +295,19 @@ entity neorv32_bus_gateway is
     -- host port --
     req_i   : in  bus_req_t;  -- host request
     rsp_o   : out bus_rsp_t;  -- host response
-    -- section ports --
+    -- device/section ports --
     a_req_o : out bus_req_t;
     a_rsp_i : in  bus_rsp_t;
     b_req_o : out bus_req_t;
     b_rsp_i : in  bus_rsp_t;
     c_req_o : out bus_req_t;
     c_rsp_i : in  bus_rsp_t;
+    d_req_o : out bus_req_t;
+    d_rsp_i : in  bus_rsp_t;
     x_req_o : out bus_req_t;
     x_rsp_i : in  bus_rsp_t
   );
-end neorv32_bus_gateway;
+end entity;
 
 architecture neorv32_bus_gateway_rtl of neorv32_bus_gateway is
 
@@ -305,15 +315,58 @@ architecture neorv32_bus_gateway_rtl of neorv32_bus_gateway is
   constant a_lo_c : natural := index_size_f(A_SIZE);
   constant b_lo_c : natural := index_size_f(B_SIZE);
   constant c_lo_c : natural := index_size_f(C_SIZE);
-  signal port_sel : std_ulogic_vector(3 downto 0);
+  constant d_lo_c : natural := index_size_f(D_SIZE);
+  signal port_sel : std_ulogic_vector(4 downto 0);
 
   -- port enable list --
-  type port_bool_list_t is array (0 to 3) of boolean;
-  constant port_en_list_c : port_bool_list_t := (A_EN, B_EN, C_EN, X_EN);
+  type port_bool_list_t is array (0 to 4) of boolean;
+  constant port_en_list_c : port_bool_list_t := (
+    A_EN,
+    B_EN,
+    C_EN,
+    D_EN,
+    X_EN
+  );
+
+  -- port timeout enable list --
+  type port_tmo_en_list_t is array (0 to 4) of boolean;
+  constant port_tmo_en_list_c : port_tmo_en_list_t := (
+    boolean(A_TMO > 0),
+    boolean(B_TMO > 0),
+    boolean(C_TMO > 0),
+    boolean(D_TMO > 0),
+    boolean(X_TMO > 0)
+  );
+
+  -- port timeout counter bit list --
+  type port_tmo_bit_list_t is array (0 to 4) of natural;
+  constant port_tmo_bit_list_c : port_tmo_bit_list_t := (
+    index_size_f(A_TMO),
+    index_size_f(B_TMO),
+    index_size_f(C_TMO),
+    index_size_f(D_TMO),
+    index_size_f(X_TMO)
+  );
+  signal tmo_bits : std_ulogic_vector(4 downto 0);
+  signal tmo_fire : std_ulogic;
+
+  -- find highest bit index in port_tmo_bit_list_c to determine counter width --
+  function max_tmo_bit_f(tmo_bit : port_tmo_bit_list_t) return natural is
+    variable res_v : natural;
+  begin
+    res_v := 0;
+    for i in tmo_bit'range loop
+      if tmo_bit(i) > res_v then
+        res_v := tmo_bit(i);
+      end if;
+    end loop;
+    return res_v;
+  end function;
+  constant tmo_cnt_size_c : natural := max_tmo_bit_f(port_tmo_bit_list_c);
 
   -- gateway ports combined as arrays --
-  type port_req_t is array (0 to 3) of bus_req_t;
-  type port_rsp_t is array (0 to 3) of bus_rsp_t;
+  type port_req_t is array (0 to 4) of bus_req_t;
+  type port_rsp_t is array (0 to 4) of bus_rsp_t;
   signal port_req : port_req_t;
   signal port_rsp : port_rsp_t;
 
@@ -321,17 +374,14 @@ architecture neorv32_bus_gateway_rtl of neorv32_bus_gateway is
   signal int_rsp : bus_rsp_t;
 
   -- bus monitor --
-  constant tmo_int_c : natural := index_size_f(TMO_INT);
-  constant tmo_ext_c : natural := index_size_f(TMO_EXT);
-  constant tmo_cnt_c : natural := sel_natural_f(boolean(tmo_ext_c > tmo_int_c), tmo_ext_c, tmo_int_c);
   type keeper_t is record
     state : std_ulogic_vector(1 downto 0);
     lock  : std_ulogic;
-    ext   : std_ulogic;
-    cnt   : std_ulogic_vector(tmo_cnt_c downto 0);
-    err   : std_ulogic;
+    sel   : std_ulogic_vector(4 downto 0);
+    cnt   : std_ulogic_vector(tmo_cnt_size_c downto 0);
   end record;
-  signal keeper : keeper_t;
+  signal keeper  : keeper_t;
+  signal bus_err : std_ulogic;
 
 begin
 
@@ -340,33 +390,35 @@ begin
   port_sel(0) <= '1' when A_EN and (req_i.addr(31 downto a_lo_c) = A_BASE(31 downto a_lo_c)) else '0';
   port_sel(1) <= '1' when B_EN and (req_i.addr(31 downto b_lo_c) = B_BASE(31 downto b_lo_c)) else '0';
   port_sel(2) <= '1' when C_EN and (req_i.addr(31 downto c_lo_c) = C_BASE(31 downto c_lo_c)) else '0';
-  port_sel(3) <= '1' when X_EN and (port_sel(2 downto 0) = "000") else '0'; -- access to the "void"
+  port_sel(3) <= '1' when D_EN and (req_i.addr(31 downto d_lo_c) = D_BASE(31 downto d_lo_c)) else '0';
+  port_sel(4) <= '1' when X_EN and (port_sel(3 downto 0) = "0000") else '0'; -- access to the "void"
 
   -- Gateway Ports --------------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
   a_req_o <= port_req(0); port_rsp(0) <= a_rsp_i;
   b_req_o <= port_req(1); port_rsp(1) <= b_rsp_i;
   c_req_o <= port_req(2); port_rsp(2) <= c_rsp_i;
-  x_req_o <= port_req(3); port_rsp(3) <= x_rsp_i;
+  d_req_o <= port_req(3); port_rsp(3) <= d_rsp_i;
+  x_req_o <= port_req(4); port_rsp(4) <= x_rsp_i;
 
   -- bus request --
   request: process(req_i, port_sel)
   begin
-    for i in 0 to 3 loop
+    for i in 0 to 4 loop
       port_req(i) <= req_terminate_c;
       if port_en_list_c(i) then -- port enabled
         port_req(i) <= req_i;
         port_req(i).stb <= req_i.stb and port_sel(i);
       end if;
     end loop;
-  end process request;
+  end process;
 
   -- bus response --
   response: process(port_rsp)
     variable tmp_v : bus_rsp_t;
   begin
     tmp_v := rsp_terminate_c; -- start with all-zero
-    for i in 0 to 3 loop -- OR all response signals
+    for i in 0 to 4 loop -- OR all response signals
       if port_en_list_c(i) then -- port enabled
         tmp_v.data := tmp_v.data or port_rsp(i).data;
         tmp_v.ack  := tmp_v.ack  or port_rsp(i).ack;
@@ -374,12 +426,12 @@ begin
       end if;
     end loop;
     int_rsp <= tmp_v;
-  end process response;
+  end process;
 
   -- host response --
   rsp_o.data <= int_rsp.data;
-  rsp_o.ack  <= int_rsp.ack or keeper.err;
-  rsp_o.err  <= int_rsp.err or keeper.err;
+  rsp_o.ack  <= int_rsp.ack or bus_err;
+  rsp_o.err  <= int_rsp.err or bus_err;
 
   -- Bus Monitor (aka "the KEEPER") ---------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -388,7 +440,7 @@ begin
     if (rstn_i = '0') then
       keeper.state <= (others => '0');
       keeper.lock  <= '0';
-      keeper.ext   <= '0';
+      keeper.sel   <= (others => '0');
       keeper.cnt   <= (others => '0');
     elsif rising_edge(clk_i) then
       case keeper.state is
@@ -396,7 +448,7 @@ begin
         when "00" => -- idle, waiting for new access request
         -- ------------------------------------------------------------
           keeper.lock <= req_i.lock;
-          keeper.ext  <= port_sel(3); -- external bus access?
+          keeper.sel  <= port_sel;
           keeper.cnt  <= (others => '0');
           if (req_i.stb = '1') then
             keeper.state <= "01";
@@ -411,8 +463,7 @@ begin
             keeper.cnt <= std_ulogic_vector(unsigned(keeper.cnt) + 1);
           end if;
           -- bus status --
-          if ((keeper.ext = '0') and (TMO_INT > 0) and (keeper.cnt(tmo_int_c) = '1')) or -- internal timeout
-             ((keeper.ext = '1') and (TMO_EXT > 0) and (keeper.cnt(tmo_ext_c) = '1')) then -- external timeout
+          if (tmo_fire = '1') then -- timeout
             keeper.state <= "11";
           elsif (keeper.lock = '1') then -- locked / burst transfer
             if (req_i.lock = '0') then
@@ -430,17 +481,23 @@ begin
 
       end case;
     end if;
-  end process bus_monitor;
+  end process;
+
+  -- timeout counter bit select --
+  tmo_bit_gen:
+  for i in 0 to 4 generate
+    tmo_bits(i) <= keeper.cnt(port_tmo_bit_list_c(i)) when port_tmo_en_list_c(i) else '0';
+  end generate;
+  tmo_fire <= or_reduce_f(tmo_bits and keeper.sel);
 
   -- bus keeper error --
-  keeper.err <= keeper.state(1); -- send error to host
-  term_o     <= keeper.state(1); -- terminate pending (external) bus access
+  bus_err <= keeper.state(1); -- send error to host
+  term_o  <= keeper.state(1); -- terminate pending (external) bus access
 
-  -- timeout notifications --
-  assert (TMO_INT > 0) report "[NEORV32] Internal bus timeout disabled! Can cause permanent system stall!" severity warning;
-  assert (TMO_EXT > 0) report "[NEORV32] External bus timeout disabled! Can cause permanent system stall!" severity warning;
+  -- external timeout notification --
+  assert (X_TMO > 0) report "[NEORV32] External bus timeout disabled! Can cause permanent system stall!" severity warning;
 
-end neorv32_bus_gateway_rtl;
+end architecture;
 
 
 -- ================================================================================ --
@@ -541,7 +598,7 @@ entity neorv32_bus_io_switch is
     dev_30_req_o : out bus_req_t; dev_30_rsp_i : in bus_rsp_t;
     dev_31_req_o : out bus_req_t; dev_31_rsp_i : in bus_rsp_t
   );
-end neorv32_bus_io_switch;
+end entity;
 
 architecture neorv32_bus_io_switch_rtl of neorv32_bus_io_switch is
 
@@ -650,7 +707,7 @@ begin
         else
           dev_req(i).stb <= '0';
         end if;
-      end process bus_request;
+      end process;
     end generate;
 
     bus_request_port_disabled:
@@ -674,9 +731,9 @@ begin
       end if;
     end loop;
     main_rsp <= tmp_v;
-  end process bus_response;
+  end process;
 
-end neorv32_bus_io_switch_rtl;
+end architecture;
 
 
 -- ================================================================================ --
@@ -710,7 +767,7 @@ entity neorv32_bus_amo_rmw is
     sys_req_o  : out bus_req_t;
     sys_rsp_i  : in  bus_rsp_t
   );
-end neorv32_bus_amo_rmw;
+end entity;
 
 architecture neorv32_bus_amo_rmw_rtl of neorv32_bus_amo_rmw is
 
@@ -743,13 +800,13 @@ begin
     elsif rising_edge(clk_i) then
       arbiter <= arbiter_nxt;
     end if;
-  end process arbiter_sync;
+  end process;
 
   -- Arbiter Comb ---------------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
   arbiter_comb: process(arbiter, core_req_i, sys_rsp_i)
   begin
-    arbiter_nxt <= arbiter; -- defaults
+    arbiter_nxt <= arbiter; -- default
     case arbiter.state is
 
       when S_IDLE => -- wait for RMW request; pass-through current request
@@ -781,12 +838,8 @@ begin
           arbiter_nxt.state <= S_IDLE;
         end if;
 
-      when others => -- undefined
-      -- ------------------------------------------------------------
-        arbiter_nxt.state <= S_IDLE;
-
     end case;
-  end process arbiter_comb;
+  end process;
 
   -- request switch --
   sys_req_o.meta  <= core_req_i.meta;
@@ -821,7 +874,7 @@ begin
         when others => alu_res <= cmp_res; -- AMOMIN[U].W / AMOMAX[U].W
       end case;
     end if;
-  end process amo_alu;
+  end process;
 
   -- comparator logic (min/max for signed/unsigned) --
   cmp_opa  <= (arbiter.rdata(arbiter.rdata'left) and arbiter.cmd(3)) & arbiter.rdata; -- sign-extend if signed operation
@@ -829,7 +882,7 @@ begin
   cmp_less <= '1' when (signed(cmp_opa) < signed(cmp_opb)) else '0';
   cmp_res  <= cmp_opa(31 downto 0) when ((cmp_less xor arbiter.cmd(0)) = '1') else cmp_opb(31 downto 0);
 
-end neorv32_bus_amo_rmw_rtl;
+end architecture;
 
 
 -- ================================================================================ --
@@ -864,7 +917,7 @@ entity neorv32_bus_amo_rvs is
     sys_req_o  : out bus_req_t;
     sys_rsp_i  : in  bus_rsp_t
   );
-end neorv32_bus_amo_rvs;
+end entity;
 
 architecture neorv32_bus_amo_rvs_rtl of neorv32_bus_amo_rvs is
 
@@ -910,7 +963,7 @@ begin
         end if;
       end if;
     end if;
-  end process reservation_station;
+  end process;
 
   -- check if reservation-set operation --
   lr <= '1' when (core_req_i.amo = '1') and (core_req_i.amoop = "1000") else '0';
@@ -925,7 +978,6 @@ begin
   -- SC valid if sent by the same core to the same address granule and reservation still active --
   sc_valid <= rsv.set when (rsv.id = core_req_i.meta(3)) and (rsv.addr = core_req_i.addr(31 downto 6)) else '0';
 
-
   -- System Bus Interface -------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
   bus_request: process(core_req_i, sc, sc_valid)
@@ -935,7 +987,7 @@ begin
       sys_req_o.rw  <= '0'; -- read instead of write
       sys_req_o.amo <= '0'; -- no longer an AMO operation
     end if;
-  end process bus_request;
+  end process;
 
   -- track pending SC operation --
   sc_result: process(rstn_i, clk_i)
@@ -955,7 +1007,7 @@ begin
         sc_pend_fail <= '0';
       end if;
     end if;
-  end process sc_result;
+  end process;
 
   -- response --
   -- SC fail + bus ok    -> access OK, reservation invalid -> return 1
@@ -967,4 +1019,4 @@ begin
                      x"00000000" when (sc_pend_pass = '1') else -- SC passed: return 0
                      sys_rsp_i.data;                            -- normal access / pass-through
 
-end neorv32_bus_amo_rvs_rtl;
+end architecture;

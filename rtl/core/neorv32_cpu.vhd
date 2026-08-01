@@ -41,6 +41,7 @@ entity neorv32_cpu is
     RISCV_ISA_Zbkx      : boolean                        := false;       -- cryptography crossbar permutation extension
     RISCV_ISA_Zbs       : boolean                        := false;       -- single-bit bit-manipulation extension
     RISCV_ISA_Zcb       : boolean                        := false;       -- additional code size reduction instructions
+    RISCV_ISA_Zcmop     : boolean                        := false;       -- compressed may-be-operations
     RISCV_ISA_Zfinx     : boolean                        := false;       -- 32-bit floating-point extension
     RISCV_ISA_Zibi      : boolean                        := false;       -- branch with immediate
     RISCV_ISA_Zicntr    : boolean                        := false;       -- base counters
@@ -99,21 +100,22 @@ entity neorv32_cpu is
     dbus_req_o : out bus_req_t;                      -- request bus
     dbus_rsp_i : in  bus_rsp_t                       -- response bus
   );
-end neorv32_cpu;
+end entity;
 
 architecture neorv32_cpu_rtl of neorv32_cpu is
 
   -- auto-configuration --
-  constant rf_awidth_c : natural := sel_natural_f(RISCV_ISA_E, 4, 5); -- register file address width
-  constant any_amo_c   : boolean := RISCV_ISA_Zaamo or RISCV_ISA_Zalrsc; -- any AMO extension available
-  constant riscv_a_c   : boolean := RISCV_ISA_Zaamo and RISCV_ISA_Zalrsc; -- A: atomic memory operations
-  constant riscv_b_c   : boolean := RISCV_ISA_Zba and RISCV_ISA_Zbb and RISCV_ISA_Zbs; -- B: bit manipulation
-  constant riscv_zcb_c : boolean := RISCV_ISA_C and RISCV_ISA_Zcb; -- Zcb: additional compressed instructions
-  constant riscv_zkt_c : boolean := CPU_FAST_SHIFT_EN; -- Zkt: data-independent execution time for cryptography operations
-  constant riscv_zkn_c : boolean := RISCV_ISA_Zbkb and RISCV_ISA_Zbkc and RISCV_ISA_Zbkx and
-                                    RISCV_ISA_Zkne and RISCV_ISA_Zknd and RISCV_ISA_Zknh; -- Zkn: NIST suite
-  constant riscv_zks_c : boolean := RISCV_ISA_Zbkb and RISCV_ISA_Zbkc and RISCV_ISA_Zbkx and
-                                    RISCV_ISA_Zksh and RISCV_ISA_Zksed; -- Zks: ShangMi suite
+  constant rf_awidth_c   : natural := sel_natural_f(RISCV_ISA_E, 4, 5); -- register file address width
+  constant any_amo_c     : boolean := RISCV_ISA_Zaamo or RISCV_ISA_Zalrsc; -- any AMO extension available
+  constant riscv_a_c     : boolean := RISCV_ISA_Zaamo and RISCV_ISA_Zalrsc; -- A: atomic memory operations
+  constant riscv_b_c     : boolean := RISCV_ISA_Zba and RISCV_ISA_Zbb and RISCV_ISA_Zbs; -- B: bit manipulation
+  constant riscv_zcb_c   : boolean := RISCV_ISA_C and RISCV_ISA_Zcb; -- Zcb: additional compressed instructions
+  constant riscv_zcmop_c : boolean := RISCV_ISA_C and RISCV_ISA_Zimop and RISCV_ISA_Zcmop; -- Zcmop: compressed may-be-operations
+  constant riscv_zkt_c   : boolean := CPU_FAST_SHIFT_EN; -- Zkt: data-independent execution time for cryptography operations
+  constant riscv_zkn_c   : boolean := RISCV_ISA_Zbkb and RISCV_ISA_Zbkc and RISCV_ISA_Zbkx and
+                                      RISCV_ISA_Zkne and RISCV_ISA_Zknd and RISCV_ISA_Zknh; -- Zkn: NIST suite
+  constant riscv_zks_c   : boolean := RISCV_ISA_Zbkb and RISCV_ISA_Zbkc and RISCV_ISA_Zbkx and
+                                      RISCV_ISA_Zksh and RISCV_ISA_Zksed; -- Zks: ShangMi suite
 
   -- busses --
   signal ctrl     : ctrl_bus_t; -- main control bus
@@ -170,6 +172,7 @@ begin
       sel_string_f(RISCV_ISA_Zbs,       "_zbs",       "" ) &
       sel_string_f(RISCV_ISA_C,         "_zca",       "" ) &
       sel_string_f(riscv_zcb_c,         "_zcb",       "" ) &
+      sel_string_f(riscv_zcmop_c,       "_zcmop",     "" ) &
       sel_string_f(RISCV_ISA_Zfinx,     "_zfinx",     "" ) &
       sel_string_f(RISCV_ISA_Zibi,      "_zibi",      "" ) &
       sel_string_f(RISCV_ISA_Zicntr,    "_zicntr",    "" ) &
@@ -210,6 +213,8 @@ begin
     -- ISA configuration checks --
     assert not (RISCV_ISA_Zcb and (not RISCV_ISA_C)) report
       "[NEORV32] CPU ISA: Zcb requires C!" severity error;
+    assert not (RISCV_ISA_Zcmop and (not RISCV_ISA_C) and (not RISCV_ISA_Zimop)) report
+      "[NEORV32] CPU ISA: Zcmop requires C and Zimop!" severity error;
 
   end generate;
 
@@ -218,9 +223,10 @@ begin
   -- -------------------------------------------------------------------------------------------
   neorv32_cpu_frontend_inst: entity neorv32.neorv32_cpu_frontend
   generic map (
-    HART_ID   => HART_ID,      -- hardware thread ID
-    RISCV_C   => RISCV_ISA_C,  -- implement C ISA extension
-    RISCV_ZCB => RISCV_ISA_Zcb -- implement Zcb ISA sub-extension
+    HART_ID     => HART_ID,       -- hardware thread ID
+    RISCV_C     => RISCV_ISA_C,   -- implement C ISA extension
+    RISCV_ZCB   => RISCV_ISA_Zcb, -- implement Zcb ISA sub-extension
+    RISCV_ZCMOP => riscv_zcmop_c  -- implement Zcb ISA sub-extension
   )
   port map (
     -- global control --
@@ -258,7 +264,6 @@ begin
     RISCV_ISA_U         => RISCV_ISA_U,         -- user mode extension
     RISCV_ISA_Zaamo     => RISCV_ISA_Zaamo,     -- atomic read-modify-write operations extension
     RISCV_ISA_Zalrsc    => RISCV_ISA_Zalrsc,    -- atomic reservation-set operations extension
-    RISCV_ISA_Zcb       => riscv_zcb_c,         -- additional code size reduction instructions
     RISCV_ISA_Zba       => RISCV_ISA_Zba,       -- shifted-add bit-manipulation extension
     RISCV_ISA_Zbb       => RISCV_ISA_Zbb,       -- basic bit-manipulation extension
     RISCV_ISA_Zbc       => RISCV_ISA_Zbc,       -- carry-less multiplication instructions
@@ -266,6 +271,8 @@ begin
     RISCV_ISA_Zbkc      => RISCV_ISA_Zbkc,      -- carry-less multiplication instructions
     RISCV_ISA_Zbkx      => RISCV_ISA_Zbkx,      -- cryptography crossbar permutation extension
     RISCV_ISA_Zbs       => RISCV_ISA_Zbs,       -- single-bit bit-manipulation extension
+    RISCV_ISA_Zcb       => riscv_zcb_c,         -- additional code size reduction instructions
+    RISCV_ISA_Zcmop     => riscv_zcmop_c,       -- compressed may-be-operations
     RISCV_ISA_Zfinx     => RISCV_ISA_Zfinx,     -- 32-bit floating-point extension
     RISCV_ISA_Zibi      => RISCV_ISA_Zibi,      -- branch with immediate
     RISCV_ISA_Zicntr    => RISCV_ISA_Zicntr,    -- base counters
@@ -549,5 +556,4 @@ begin
     trace_o <= trace_port_terminate_c;
   end generate;
 
-
-end neorv32_cpu_rtl;
+end architecture;

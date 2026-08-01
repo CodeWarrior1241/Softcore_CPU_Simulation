@@ -41,7 +41,7 @@ entity neorv32_prim_fifo is
     rdata_o : out std_ulogic_vector(DWIDTH-1 downto 0); -- read data
     avail_o : out std_ulogic                            -- data available when set
   );
-end neorv32_prim_fifo;
+end entity;
 
 architecture neorv32_prim_fifo_rtl of neorv32_prim_fifo is
 
@@ -67,7 +67,7 @@ begin
       w_pnt <= w_nxt;
       r_pnt <= r_nxt;
     end if;
-  end process pointer_reg;
+  end process;
 
   -- access control --
   re <= re_i and (not empty); -- read only if data available
@@ -93,7 +93,7 @@ begin
       elsif rising_edge(clk_i) then
         avail <= not empty;
       end if;
-    end process status_reg;
+    end process;
   end generate;
 
   -- just 1 FIFO entry --
@@ -123,7 +123,7 @@ begin
         end if;
         rdata <= fifo(to_integer(unsigned(r_pnt(AWIDTH-1 downto 0))));
       end if;
-    end process memory_core;
+    end process;
   end generate;
 
   -- just 1 FIFO entry --
@@ -138,14 +138,14 @@ begin
           fifo(0) <= wdata_i;
         end if;
       end if;
-    end process memory_core;
+    end process;
     rdata <= fifo(0);
   end generate;
 
   -- output gate: output zero if no data available --
   rdata_o <= (others => '0') when OUTGATE and (avail = '0') else rdata;
 
-end neorv32_prim_fifo_rtl;
+end architecture;
 
 
 -- ================================================================================ --
@@ -181,7 +181,7 @@ entity neorv32_prim_spram is
     data_i : in  std_ulogic_vector(DWIDTH-1 downto 0); -- write data
     data_o : out std_ulogic_vector(DWIDTH-1 downto 0)  -- read data
   );
-end neorv32_prim_spram;
+end entity;
 
 architecture neorv32_prim_spram_rtl of neorv32_prim_spram is
 
@@ -205,7 +205,7 @@ begin
           rdata <= spram(to_integer(unsigned(addr_i)));
         end if;
       end if;
-    end process memory_core;
+    end process;
   end generate;
 
   -- single entry only --
@@ -218,7 +218,7 @@ begin
           spram(0) <= data_i;
         end if;
       end if;
-    end process memory_core;
+    end process;
     rdata <= spram(0);
   end generate;
 
@@ -231,7 +231,7 @@ begin
       if rising_edge(clk_i) then
         data_o <= rdata;
       end if;
-    end process read_outreg;
+    end process;
   end generate;
 
   -- no output register --
@@ -240,7 +240,7 @@ begin
     data_o <= rdata;
   end generate;
 
-end neorv32_prim_spram_rtl;
+end architecture;
 
 
 -- ================================================================================ --
@@ -274,7 +274,7 @@ entity neorv32_prim_mul is
     opb_sn_i : in  std_ulogic;                              -- operand B is a signed number
     res_o    : out std_ulogic_vector((2*DWIDTH)-1 downto 0) -- resulting product
   );
-end neorv32_prim_mul;
+end entity;
 
 architecture neorv32_prim_mul_rtl of neorv32_prim_mul is
 
@@ -297,7 +297,7 @@ begin
         opb <= signed((opb_i(opb_i'left) and opb_sn_i) & opb_i);
       end if;
     end if;
-  end process in_reg;
+  end process;
 
   -- Output Register ------------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -306,7 +306,7 @@ begin
     if rising_edge(clk_i) then -- no reset to improve DSP mapping
       res <= opa * opb;
     end if;
-  end process out_reg;
+  end process;
 
   -- Optional Pipeline Register -------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
@@ -331,7 +331,7 @@ begin
   -- result --
   res_o <= std_ulogic_vector(res_pipe((2*DWIDTH)-1 downto 0));
 
-end neorv32_prim_mul_rtl;
+end architecture;
 
 
 -- ================================================================================ --
@@ -367,7 +367,7 @@ entity neorv32_prim_cnt is
     oe_i   : in  std_ulogic;                     -- output enable
     cnt_o  : out std_ulogic_vector(63 downto 0)  -- trimmed counter output
   );
-end neorv32_prim_cnt;
+end entity;
 
 architecture neorv32_prim_cnt_rtl of neorv32_prim_cnt is
 
@@ -403,7 +403,7 @@ begin
         count(63 downto 32) <= inc_hi(31 downto 0);
       end if;
     end if;
-  end process counter_core;
+  end process;
 
   -- increments --
   inc_lo <= std_ulogic_vector(unsigned('0' & count(31 downto  0)) + unsigned(incen));
@@ -417,6 +417,6 @@ begin
     if (oe_i = '1') and (CWIDTH > 0) then
       cnt_o(CWIDTH-1 downto 0) <= count(CWIDTH-1 downto 0);
     end if;
-  end process trim;
+  end process;
 
-end neorv32_prim_cnt_rtl;
+end architecture;

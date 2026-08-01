@@ -155,7 +155,7 @@ chmod +x run_sim.sh
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--time TIME` | Simulation duration | `150ms` |
+| `--time TIME` | Simulation duration | `500ms` |
 | `--wave FILE` | Waveform output filename | `neorv32_tb.fst` |
 | `--quiet` | Suppress simulation progress output | - |
 | `--clean` | Remove work directory and exit | - |
@@ -284,7 +284,7 @@ RECOMMENDED: --time 503ms
 | 1024    | 4 KB    | ~360 ms   | **500 ms**  |
 | 2048    | 8 KB    | ~720 ms   | 900 ms      |
 
-The default `--time 150ms` is only sufficient for basic tests. For full QPSK snapshot capture (1024 samples), use:
+The default `--time 500ms` covers the full QPSK snapshot capture (1024 samples). Explicitly:
 
 ```bash
 run_sim.bat --time 500ms
