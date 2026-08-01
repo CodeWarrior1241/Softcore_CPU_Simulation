@@ -246,6 +246,33 @@ static uint32_t compute_clk_hz(uint32_t freq_count)
 			  (uint64_t)CLK_MON_WINDOW);
 }
 
+/* Poll the up_clock_mon l_clk readout until it is within ~2% of the expected
+ * DATA_CLK rate. The platform-common "link clock is really back" gate for
+ * power_up: on PolarFire l_clk is the PF_CCC PLL output, which FREE-RUNS at a
+ * drift frequency while the chip sleeps (reference lost) and must relock to
+ * the returned DATA_CLK before any interface traffic -- the same lock also
+ * re-establishes the OUT0/OUT1 +90 deg FB_CLK relationship (Post-VCO
+ * feedback). On Xilinx l_clk is a buffer, so this just confirms DATA_CLK
+ * returned. The monitor window is 65536 AXI clocks (~0.5 ms), so 1 ms poll
+ * steps always see a fresh measurement. Returns the wait in ms, or -1 on
+ * timeout (~500 ms, far above the CCC's ms-class relock time). */
+static int wait_l_clk_rate(void)
+{
+	int is_2r2t = default_init_param.two_rx_two_tx_mode_enable ? 1 : 0;
+	uint32_t expected = default_init_param.rx_path_clock_frequencies[5] *
+			    (is_2r2t ? 4u : 2u);
+	uint32_t tol = expected / 50u;   /* ~2% */
+
+	for (int ms = 0; ms < 500; ms++) {
+		uint32_t hz = compute_clk_hz(AD9361_REG(ADC_REG_CLK_FREQ));
+		uint32_t err = (hz > expected) ? (hz - expected) : (expected - hz);
+		if (err <= tol)
+			return ms;
+		no_os_mdelay(1);
+	}
+	return -1;
+}
+
 static void dump_adc_status(void)
 {
 	uint32_t freq   = AD9361_REG(ADC_REG_CLK_FREQ);
@@ -306,6 +333,13 @@ static void dump_adc_status(void)
 			     (unsigned)((status >> 2) & 0x1),
 			     (unsigned)((status >> 3) & 0x1),
 			     (unsigned)((status >> 4) & 0x1));
+	/* On PolarFire the fabric feeds the PF_CCC lock into the status bit
+	 * (lvds_if: adc_status = lock && frame-ok), so link_ok doubles as the
+	 * l_clk PLL lock indicator: 1 in operation, 0 while the chip sleeps
+	 * (DATA_CLK absent -> CCC reference lost). */
+	if (!PLATFORM_IS_XILINX())
+		neorv32_uart0_printf("  l_clk_pll_locked=%u (PolarFire: link_ok = PF_CCC lock && frame ok)\n",
+				     (unsigned)(status & 0x1));
 
 	static const char *ch_names[4] = { "ch0_I", "ch0_Q", "ch1_I", "ch1_Q" };
 	for (int ch = 0; ch < 4; ch++) {
@@ -1412,11 +1446,16 @@ int main(void)
 					     (unsigned)gpio_status);
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_GET_ADC_STATUS)) {
-			if (!power_state) { neorv32_uart0_puts("powered_down\n"); continue; }
+			/* Allowed while powered down: pure fabric AXI reads in the
+			 * always-on up domain (no chip SPI, no l_clk dependency;
+			 * compute paths guard l_clk_hz==0). This is how the sleep
+			 * state is OBSERVED: expect l_clk_pll_locked=0 and a
+			 * free-running l_clk_hz on PolarFire, l_clk_hz=0 on Xilinx. */
 			dump_adc_status();
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_GET_DAC_STATUS)) {
-			if (!power_state) { neorv32_uart0_puts("powered_down\n"); continue; }
+			/* Allowed while powered down: same fabric-only reads as
+			 * get_adc_status. */
 			dump_dac_status();
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_GET_VALID_RATE)) {
@@ -1530,9 +1569,14 @@ int main(void)
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_POWER_DOWN)) {
 			/* Tier-0 deep low-power: chip ENSM SLEEP only (the dominant Watts:
-			 * RF synths, mixers, ADC/DAC, BB filters), which also stops the
-			 * BBPLL -> DATA_CLK -> l_clk, so the whole l_clk fabric domain
-			 * quiesces for free. The fabric pwr_dn gate (Tier-1: clk_out2 +
+			 * RF synths, mixers, ADC/DAC, BB filters). Measured on mpf300
+			 * hardware: this SLEEP sequence leaves BBPLL/DATA_CLK RUNNING
+			 * (l_clk monitor unchanged at 61.44 MHz, PF_CCC locked
+			 * throughout) -- a WAIT-class state, so the l_clk fabric domain
+			 * keeps clocking on both platforms; the datapath is parked below
+			 * before the chip descends, which is what makes that harmless.
+			 * The wake-side relock gate in power_up stays as armor for any
+			 * future clocks-off deep sleep. The fabric pwr_dn gate (Tier-1: clk_out2 +
 			 * s_axi_aresetn reset-hold) is DELIBERATELY NOT used: on this
 			 * bitstream the gate cycle corrupts the axi_ad9361 IDELAY/dev_if so
 			 * that no IDELAY tap recovers on wake (dig_tune all-'#'). Verified by
@@ -1616,13 +1660,35 @@ int main(void)
 			 *    axi_ad9361 dev_if resumes capturing on the same IDELAY taps. */
 			ad9361_set_en_state_machine_mode(phy, ENSM_MODE_FDD);
 			no_os_mdelay(1);
-			/* 4. Re-center the LVDS capture eye (re-tune; taps persisted, this
-			 *    just re-acquires against the relocked DATA_CLK phase). */
+			/* 3b. Gate on the link clock really being back: poll the l_clk rate
+			 *     monitor to the expected DATA_CLK rate (see wait_l_clk_rate --
+			 *     on PolarFire this is the PF_CCC relock gate; nothing below may
+			 *     run against a free-running l_clk). Timeout = warn loudly and
+			 *     continue: nothing below is destructive, and a wrecked
+			 *     constellation plus this line is the diagnosis. */
 			{
+				int ms = wait_l_clk_rate();
+				if (ms < 0)
+					neorv32_uart0_puts("[power_up] WARNING: l_clk rate poll TIMED OUT (PLL not relocked?)\n");
+				else
+					neorv32_uart0_printf("[power_up] l_clk at rate after %d ms\n", ms);
+				uint32_t st = AD9361_REG(ADC_REG_STATUS);
+				neorv32_uart0_printf("[power_up] adc_status=0x%x link_ok=%u%s\n",
+						     (unsigned)st, (unsigned)(st & 0x1),
+						     PLATFORM_IS_XILINX() ? "" :
+						     " (PolarFire: PF_CCC lock && frame ok)");
+			}
+			/* 4. Xilinx only: re-center the LVDS capture eye (IDELAY re-tune
+			 *    against the relocked DATA_CLK phase). PolarFire has no
+			 *    IDELAYs -- RX timing is static (SDC + P&R), nothing to
+			 *    re-acquire -- so the step is skipped. */
+			if (PLATFORM_IS_XILINX()) {
 				uint8_t sk = phy->pdata->dig_interface_tune_skipmode;
 				phy->pdata->dig_interface_tune_skipmode = 1;
 				ad9361_dig_tune(phy, 0, BE_MOREVERBOSE | DO_IDELAY);
 				phy->pdata->dig_interface_tune_skipmode = sk;
+			} else {
+				neorv32_uart0_puts("[power_up] dig_tune skipped (PolarFire: static SDC timing)\n");
 			}
 			/* 4b. Clear the chip TX-enable / data-port / BIST residual the wake
 			 *     dig_tune leaves behind (it drives BIST + internal loopback +
@@ -1634,7 +1700,10 @@ int main(void)
 			 *     Replicate Measure Floor's net effect: disable any PRBS
 			 *     injection, then toggle bist_loopback. bist_loopback(0) re-runs
 			 *     fix_ch_cross/en_dis_tx (TX channel re-enabled) and rewrites the
-			 *     REG_OBSERVE_CONFIG loop-test bits. */
+			 *     REG_OBSERVE_CONFIG loop-test bits. Kept on PolarFire too (no
+			 *     wake dig_tune there, so no residual): it is idempotent and
+			 *     re-runs en_dis_tx after SLEEP, keeping both platforms' wake
+			 *     sequences identical. */
 			ad9361_bist_prbs(phy, BIST_DISABLE);
 			ad9361_bist_loopback(phy, 1);
 			ad9361_bist_loopback(phy, 0);
@@ -1708,13 +1777,26 @@ int main(void)
 							 tx_quad_corr_snap[i]);
 			ad9361_set_en_state_machine_mode(phy, ENSM_MODE_FDD);
 			no_os_mdelay(1);
-			/* Verbose capture readout (boot 6.6 probe) + re-acquire dig_tune. */
-			diag_dig_tune_one_step(phy, 8, 8);
+			/* Link-clock gate, same as production power_up (PolarFire: PF_CCC
+			 * relock; Xilinx: DATA_CLK returned). */
 			{
+				int ms = wait_l_clk_rate();
+				if (ms < 0)
+					neorv32_uart0_puts("[power_up_t0] WARNING: l_clk rate poll TIMED OUT (PLL not relocked?)\n");
+				else
+					neorv32_uart0_printf("[power_up_t0] l_clk at rate after %d ms\n", ms);
+			}
+			/* Verbose capture readout (boot 6.6 probe) -- the point of the t0
+			 * twin, kept on both platforms + re-acquire dig_tune (Xilinx only,
+			 * same gating as production power_up). */
+			diag_dig_tune_one_step(phy, 8, 8);
+			if (PLATFORM_IS_XILINX()) {
 				uint8_t sk = phy->pdata->dig_interface_tune_skipmode;
 				phy->pdata->dig_interface_tune_skipmode = 1;
 				ad9361_dig_tune(phy, 0, BE_MOREVERBOSE | DO_IDELAY);
 				phy->pdata->dig_interface_tune_skipmode = sk;
+			} else {
+				neorv32_uart0_puts("[power_up_t0] dig_tune skipped (PolarFire: static SDC timing)\n");
 			}
 			/* Re-establish TX-enable / data-port / BIST state (see power_up). */
 			ad9361_bist_prbs(phy, BIST_DISABLE);
