@@ -12,8 +12,10 @@
 #               pipelined-multiplier change applied in deps/neorv32, plus the
 #               firmware IMEM image built by run_sim.sh
 #   work        everything else: ADI axi_ad9361 (PolarFire port), PULP
-#               axi/common_cells, open-logic base, SmartHLS adapters, mpf300
-#               project HDL, sim-local top/TB
+#               axi/common_cells, Bedrock-RTL (CDC FIFO ctrl + bit sync,
+#               compiled with BR_ASSERT_ON so the integration assertions --
+#               including the FIFO reset-overlap checker -- are live),
+#               SmartHLS adapters, mpf300 project HDL, sim-local top/TB
 #
 # Environment (optional):
 #   LIBERO_INSTALL_DIR   Libero_SoC install dir (for the PolarFire primitive
@@ -31,7 +33,7 @@ set repo_root    [file normalize "$sim_dir/../../../.."]
 set lib_dir   "$repo_root/deps/hdl/library"
 set ip_dir    "$lib_dir/axi_ad9361"
 set mpf300    "$repo_root/deps/hdl/projects/fmcomms2/mpf300"
-set olo_dir   "$repo_root/deps/open-logic/src/base/vhdl"
+set br_dir    "$repo_root/deps/bedrock-rtl"
 set cc_dir    "$repo_root/deps/common_cells"
 set axi_dir   "$repo_root/deps/axi"
 set hls_ad9361 "$repo_root/src/axi_ad9361_adapter_microchip/hls_output/rtl"
@@ -103,23 +105,49 @@ vcom -2008 -work work -quiet $neorv32_home/rtl/system_integration/neorv32_vivado
 vcom -2008 -work work -quiet $sim_dir/neorv32_mpf300_top.vhd
 
 # ================================================================================
-# open-logic base components (VHDL-2008, library work)
+# Bedrock-RTL components (SystemVerilog, library work). Dependency order
+# (packages/leaves first) -- same list as build_all.tcl and the Verilator
+# Makefile. BR_ASSERT_ON arms the integration assertions (reset-overlap
+# checker, handshake stability, etc.); synthesis and Verilator never
+# define it. See doc/MPF300-Splash-Kit/bedrock_migration_design.md.
 # ================================================================================
 
-puts "Compiling open-logic base components..."
+puts "Compiling Bedrock-RTL components..."
+set BR_OPTS [list -sv -quiet +incdir+$br_dir/macros +define+BR_ASSERT_ON -work work]
 foreach f {
-    olo_base_pkg_attribute.vhd
-    olo_base_pkg_array.vhd
-    olo_base_pkg_math.vhd
-    olo_base_pkg_logic.vhd
-    olo_base_pkg_string.vhd
-    olo_base_cc_bits.vhd
-    olo_base_cc_reset.vhd
-    olo_base_ram_sdp.vhd
-    olo_base_fifo_async.vhd
-    olo_base_reset_gen.vhd
+    pkg/br_math_pkg.sv
+    gate/rtl/br_gate_mock.sv
+    misc/rtl/br_misc_unused.sv
+    misc/rtl/br_misc_tieoff_zero.sv
+    misc/rtl/br_misc_tieoff_one.sv
+    cdc/rtl/br_cdc_pkg.sv
+    cdc/rtl/br_cdc_bit_toggle.sv
+    counter/rtl/br_counter_incr.sv
+    flow/rtl/internal/br_flow_checks_valid_data_intg.sv
+    fifo/rtl/internal/br_fifo_push_ctrl_core.sv
+    enc/rtl/br_enc_bin2gray.sv
+    delay/rtl/br_delay_nr.sv
+    cdc/rtl/internal/br_cdc_fifo_reset_overlap_checks.sv
+    enc/rtl/br_enc_gray2bin.sv
+    cdc/rtl/internal/br_cdc_fifo_push_flag_mgr.sv
+    cdc/rtl/internal/br_cdc_fifo_push_ctrl.sv
+    cdc/rtl/internal/br_cdc_fifo_gray_count_sync.sv
+    cdc/rtl/br_cdc_fifo_ctrl_push_1r1w.sv
+    cdc/rtl/internal/br_cdc_fifo_pop_flag_mgr.sv
+    delay/rtl/br_delay_valid.sv
+    delay/rtl/br_delay_shift_reg.sv
+    counter/rtl/br_counter.sv
+    flow/rtl/internal/br_flow_checks_valid_data_impl.sv
+    flow/rtl/br_flow_reg_fwd.sv
+    mux/rtl/br_mux_onehot.sv
+    fifo/rtl/internal/br_fifo_staging_buffer.sv
+    fifo/rtl/internal/br_fifo_pop_ctrl_core.sv
+    cdc/rtl/internal/br_cdc_fifo_pop_ctrl.sv
+    cdc/rtl/br_cdc_fifo_ctrl_pop_1r1w.sv
+    cdc/rtl/br_cdc_fifo_ctrl_1r1w.sv
+    cdc/rtl/br_cdc_rst_sync.sv
 } {
-    vcom -2008 -work work -quiet $olo_dir/$f
+    vlog {*}$BR_OPTS $br_dir/$f
 }
 
 # ================================================================================
@@ -192,9 +220,9 @@ vlog -quiet -work work "+define+MEM_INIT_DIR=\"./\"" \
 
 puts "Compiling mpf300 project HDL..."
 vlog {*}$PULP_OPTS $mpf300/hdl/axi_1to3_decoder.sv
-foreach f {axi_bram_32k.v axis_async_fifo.v dac_hold.v sys_ctrl.v
-           lclk_reset_sync.v refclk_ibuf.v} {
-    vlog -quiet -work work $mpf300/hdl/$f
+foreach f {axi_bram_32k.v mpf300_reset_gen.sv axis_async_fifo.v dac_hold.v
+           sys_ctrl.v lclk_reset_sync.v refclk_ibuf.v} {
+    vlog -sv -quiet -work work $mpf300/hdl/$f
 }
 
 # ================================================================================

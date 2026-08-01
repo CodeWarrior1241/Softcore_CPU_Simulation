@@ -50,12 +50,12 @@
 //     pairs; the mpf300 dac_hold block converts them to the level-held
 //     dac_data_* buses the TB port list expects.
 //
-//   * The reset synchronizers are behavioral, copied unchanged from the
-//     Xilinx variant. The mpf300 project's sys_ctrl / lclk_reset_sync are
-//     built on open-logic olo_base_reset_gen / olo_base_cc_bits, which are
-//     VHDL — not compilable by Verilator (same reason the Xilinx variant
-//     replaced the VHDL-origin proc_sys_reset). They implement the same
-//     async-assert/sync-release behavior modeled here.
+//   * The reset blocks are the REAL project RTL: sys_ctrl and
+//     lclk_reset_sync, pure SystemVerilog since the Bedrock-RTL migration
+//     (mpf300_reset_gen + br_cdc_bit_toggle; see doc/MPF300-Splash-Kit/
+//     bedrock_migration_design.md). Earlier revisions modeled them
+//     behaviorally here because their open-logic internals were VHDL,
+//     which Verilator cannot compile.
 //==============================================================================
 
 `timescale 1ns / 1ps
@@ -120,32 +120,51 @@ module datapath_top (
 );
 
     //--------------------------------------------------------------------------
-    // Fabric-clock reset synchronizer (unchanged from the Xilinx variant)
+    // Reset generation — the REAL mpf300 blocks (sys_ctrl + lclk_reset_sync,
+    // pure SV since the Bedrock-RTL migration; previously modeled
+    // behaviorally here because their open-logic internals were VHDL).
+    // Tie-offs mirror mpf300_sim_top.v with no CPU present: init flags true,
+    // gpio_o all-zero (pwr_dn = 0, so aresetn_gated == sys_resetn).
     //--------------------------------------------------------------------------
-    reg [3:0] rst150_sync = 4'b0;
-    always @(posedge clk_150 or negedge system_resetn) begin
-        if (!system_resetn)
-            rst150_sync <= 4'b0;
-        else if (!clk_150_locked)
-            rst150_sync <= 4'b0;
-        else
-            rst150_sync <= {rst150_sync[2:0], 1'b1};
-    end
-    wire cpu_aresetn = rst150_sync[3];
+    wire sys_resetn, sys_reset, aresetn_gated, pwr_dn;
 
-    //--------------------------------------------------------------------------
-    // l_clk reset synchronizer (unchanged from the Xilinx variant)
-    //--------------------------------------------------------------------------
-    reg [3:0] rst125_sync = 4'b0;
-    always @(posedge l_clk or negedge system_resetn) begin
-        if (!system_resetn)
-            rst125_sync <= 4'b0;
-        else if (!clk_150_locked)
-            rst125_sync <= 4'b0;
-        else
-            rst125_sync <= {rst125_sync[2:0], 1'b1};
-    end
-    wire lclk_aresetn = rst125_sync[3];
+    sys_ctrl sys_ctrl_0 (
+        .clk            (clk_150),
+        .pll_lock       (clk_150_locked),
+        .init_done      (1'b1),
+        .sram_init_done (1'b1),
+        .ext_resetn     (system_resetn),
+        .gpio_o         (16'h0000),
+        .spi_csn_i      (8'hFF),
+        .sys_resetn     (sys_resetn),
+        .sys_reset      (sys_reset),
+        .aresetn_gated  (aresetn_gated),
+        .pwr_dn         (pwr_dn),
+        .up_enable      (),
+        .up_txnrx       (),
+        .gpio_resetb    (),
+        .gpio_sync      (),
+        .gpio_en_agc    (),
+        .gpio_ctl       (),
+        .spi_csn_0      ()
+    );
+
+    wire lclk_resetn, lclk_reset;
+
+    lclk_reset_sync lclk_reset_sync_0 (
+        .l_clk       (l_clk),
+        .clk_125     (clk_150),
+        .ext_resetn  (sys_resetn),
+        .pwr_dn      (pwr_dn),
+        .lclk_resetn (lclk_resetn),
+        .lclk_reset  (lclk_reset)
+    );
+
+    // Domain resets under the names the rest of this file (and the Xilinx
+    // variant) uses. pwr_dn = 0 makes aresetn_gated == sys_resetn, so the
+    // FIFO reset wiring below matches mpf300_sim_top.v for both FIFOs.
+    wire cpu_aresetn  = aresetn_gated;
+    wire lclk_aresetn = lclk_resetn;
 
     //--------------------------------------------------------------------------
     // DAC valid/enable generation (axi_ad9361 stand-in, l_clk domain)

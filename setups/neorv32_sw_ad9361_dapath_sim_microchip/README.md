@@ -22,9 +22,9 @@ SmartDesign built by `deps/hdl/projects/fmcomms2/mpf300/build_all.tcl`
 | `axi_cpu_interconnect` | mpf300 `axi_1to3_decoder.sv` (PULP `axi_lite_xbar`) |
 | `axi_ad9361_0` | ADI core + PolarFire LVDS interface (primitives compiled from the Libero install) |
 | `axi_ad9361_adapter_0`, `axi_streaming_adapter_0` | SmartHLS generated RTL (`src/*_microchip`) |
-| `ad9361_cdc_tx/rx_fifo`, `sys_ctrl_0`, `lclk_reset_sync_0` | mpf300 HDL (open-logic inside) |
+| `ad9361_cdc_tx/rx_fifo`, `sys_ctrl_0`, `lclk_reset_sync_0` | mpf300 HDL (Bedrock-RTL inside since the migration) |
 | `qpsk_snapshot_bram`, `dac_hold_0`, `refclk_ibuf_0` | mpf300 HDL |
-| `clk_gen`, `init_monitor` | behavioral stand-ins (`pf_ccc_sim.v`) for the generated PF_CCC / PF_INIT_MONITOR cores |
+| `clk_gen`, `init_monitor` | behavioral stand-ins (`pf_ccc_sim.v`) for the generated PF_CCC / PF_CCC_C1 / PF_INIT_MONITOR cores |
 
 ## Firmware
 

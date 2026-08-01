@@ -11,12 +11,13 @@
 # (deps/hdl/projects/fmcomms2/mpf300):
 #   axi_ad9361_adapter            SmartHLS RTL (src/axi_ad9361_adapter_microchip)
 #   axi_lite_to_streaming_adapter SmartHLS RTL (src/axi_lite_to_streaming_adapter_microchip)
-#   axis_async_fifo x2            mpf300 CDC FIFO (open-logic olo_base_fifo_async;
-#                                 behavioral SV model of the VHDL entity here)
+#   axis_async_fifo x2            mpf300 CDC FIFO (Bedrock-RTL
+#                                 br_cdc_fifo_ctrl_1r1w inside; real RTL)
+#   sys_ctrl, lclk_reset_sync     mpf300 reset blocks (real RTL; Bedrock +
+#                                 mpf300_reset_gen since the migration)
 #   dac_hold                      mpf300 DAC holding registers
 #   PF_CCC                        behavioral replacement (pf_ccc_behavioral.sv)
-# Omits: NEORV32 CPU, axi_1to3_decoder/BRAM, axi_ad9361 LVDS transceiver,
-#        open-logic reset blocks (VHDL; modeled behaviorally in datapath_top)
+# Omits: NEORV32 CPU, axi_1to3_decoder/BRAM, axi_ad9361 LVDS transceiver
 #
 # See tb_top.sv header for the full scope rationale.
 #
@@ -56,18 +57,61 @@ HLS_STREAM_SOURCES := \
 	$(HLS_STREAM_DIR)/axi_lite_to_streaming_adapter_axi_lite_to_streaming_adapter.v
 
 #------------------------------------------------------------------------------
-# CDC FIFOs — mpf300 axis_async_fifo wrapper + open-logic olo_base_fifo_async
-# engine. The real engine is VHDL (deps/open-logic), which Verilator cannot
-# compile; olo_base_fifo_async.sv here is a port-compatible behavioral model
-# (same pattern as pf_ccc_behavioral.sv and the reset blocks in datapath_top).
+# CDC FIFOs + reset blocks — the REAL mpf300 RTL, no stand-ins: since the
+# Bedrock-RTL migration (doc/MPF300-Splash-Kit/bedrock_migration_design.md)
+# axis_async_fifo, sys_ctrl and lclk_reset_sync are pure SystemVerilog
+# (Bedrock br_cdc_fifo_ctrl_1r1w / br_cdc_bit_toggle / br_cdc_rst_sync +
+# project mpf300_reset_gen), so Verilator compiles the synthesis sources
+# directly. Bedrock file list in dependency order — same list as
+# build_all.tcl and the Questa compile.do. BR_ASSERT_ON and SIMULATION are
+# deliberately NOT defined (the SIMULATION-gated CDC delay randomization
+# uses process::self(), unsupported by Verilator; without the defines the
+# deterministic path is used).
 #------------------------------------------------------------------------------
 MPF300_HDL_DIR   := $(REPO_ROOT)/deps/hdl/projects/fmcomms2/mpf300/hdl
+BEDROCK_DIR      := $(REPO_ROOT)/deps/bedrock-rtl
+
+BEDROCK_SOURCES := \
+	$(BEDROCK_DIR)/pkg/br_math_pkg.sv \
+	$(BEDROCK_DIR)/gate/rtl/br_gate_mock.sv \
+	$(BEDROCK_DIR)/misc/rtl/br_misc_unused.sv \
+	$(BEDROCK_DIR)/misc/rtl/br_misc_tieoff_zero.sv \
+	$(BEDROCK_DIR)/misc/rtl/br_misc_tieoff_one.sv \
+	$(BEDROCK_DIR)/cdc/rtl/br_cdc_pkg.sv \
+	$(BEDROCK_DIR)/cdc/rtl/br_cdc_bit_toggle.sv \
+	$(BEDROCK_DIR)/counter/rtl/br_counter_incr.sv \
+	$(BEDROCK_DIR)/flow/rtl/internal/br_flow_checks_valid_data_intg.sv \
+	$(BEDROCK_DIR)/fifo/rtl/internal/br_fifo_push_ctrl_core.sv \
+	$(BEDROCK_DIR)/enc/rtl/br_enc_bin2gray.sv \
+	$(BEDROCK_DIR)/delay/rtl/br_delay_nr.sv \
+	$(BEDROCK_DIR)/cdc/rtl/internal/br_cdc_fifo_reset_overlap_checks.sv \
+	$(BEDROCK_DIR)/enc/rtl/br_enc_gray2bin.sv \
+	$(BEDROCK_DIR)/cdc/rtl/internal/br_cdc_fifo_push_flag_mgr.sv \
+	$(BEDROCK_DIR)/cdc/rtl/internal/br_cdc_fifo_push_ctrl.sv \
+	$(BEDROCK_DIR)/cdc/rtl/internal/br_cdc_fifo_gray_count_sync.sv \
+	$(BEDROCK_DIR)/cdc/rtl/br_cdc_fifo_ctrl_push_1r1w.sv \
+	$(BEDROCK_DIR)/cdc/rtl/internal/br_cdc_fifo_pop_flag_mgr.sv \
+	$(BEDROCK_DIR)/delay/rtl/br_delay_valid.sv \
+	$(BEDROCK_DIR)/delay/rtl/br_delay_shift_reg.sv \
+	$(BEDROCK_DIR)/counter/rtl/br_counter.sv \
+	$(BEDROCK_DIR)/flow/rtl/internal/br_flow_checks_valid_data_impl.sv \
+	$(BEDROCK_DIR)/flow/rtl/br_flow_reg_fwd.sv \
+	$(BEDROCK_DIR)/mux/rtl/br_mux_onehot.sv \
+	$(BEDROCK_DIR)/fifo/rtl/internal/br_fifo_staging_buffer.sv \
+	$(BEDROCK_DIR)/fifo/rtl/internal/br_fifo_pop_ctrl_core.sv \
+	$(BEDROCK_DIR)/cdc/rtl/internal/br_cdc_fifo_pop_ctrl.sv \
+	$(BEDROCK_DIR)/cdc/rtl/br_cdc_fifo_ctrl_pop_1r1w.sv \
+	$(BEDROCK_DIR)/cdc/rtl/br_cdc_fifo_ctrl_1r1w.sv \
+	$(BEDROCK_DIR)/cdc/rtl/br_cdc_rst_sync.sv
 
 CDC_SOURCES := \
-	olo_base_fifo_async.sv \
+	$(BEDROCK_SOURCES) \
 	$(MPF300_HDL_DIR)/axis_async_fifo.v
 
 MPF300_SOURCES := \
+	$(MPF300_HDL_DIR)/mpf300_reset_gen.sv \
+	$(MPF300_HDL_DIR)/sys_ctrl.v \
+	$(MPF300_HDL_DIR)/lclk_reset_sync.v \
 	$(MPF300_HDL_DIR)/dac_hold.v
 
 # The SmartHLS RAM models load init files via {`MEM_INIT_DIR, "<name>.mem"};
@@ -96,6 +140,8 @@ VERILATOR_FLAGS := \
 	-sv \
 	-I$(HLS_ADAPTER_DIR) \
 	-I$(HLS_STREAM_DIR) \
+	-I$(BEDROCK_DIR)/macros \
+	+define+BR_VERILATOR \
 	$(MEM_INIT) \
 	+libext+.v \
 	-Wall \
@@ -149,5 +195,5 @@ check-deps:
 	@echo "Source strategy: ALL behavioral RTL, zero vendor primitives"
 	@echo "  SmartHLS ad9361_adapter:    $(words $(HLS_ADAPTER_SOURCES)) file(s)"
 	@echo "  SmartHLS streaming_adapter: $(words $(HLS_STREAM_SOURCES)) file(s)"
-	@echo "  CDC FIFOs (olo model + wrapper): $(words $(CDC_SOURCES)) files"
+	@echo "  CDC FIFOs (Bedrock + wrapper): $(words $(CDC_SOURCES)) files"
 	@echo "  PF_CCC:                     behavioral replacement"

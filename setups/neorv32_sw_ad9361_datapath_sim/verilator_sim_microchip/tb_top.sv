@@ -45,10 +45,9 @@
 //     generated core with an encrypted simulation model. Replaced with
 //     pf_ccc_behavioral.sv (counterpart of clk_wiz_behavioral.sv).
 //
-//   sys_ctrl / lclk_reset_sync (open-logic olo_base_reset_gen + cc_bits):
-//     VHDL — Verilator compiles no VHDL (same reason the Xilinx variant
-//     replaced the VHDL-origin proc_sys_reset). Modeled by the behavioral
-//     reset synchronizers in datapath_top.sv.
+//   (sys_ctrl / lclk_reset_sync are the REAL project RTL since the
+//     Bedrock-RTL migration made them pure SystemVerilog — no longer
+//     modeled behaviorally; see datapath_top.sv.)
 //
 //   power-gating (pwr_dn reset-hold):
 //     intentionally NOT modeled, as on the Xilinx variant: no CPU to

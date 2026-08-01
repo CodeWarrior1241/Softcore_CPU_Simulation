@@ -5,7 +5,7 @@
 # Microchip counterpart of ../neorv32_sw_ad9361_datapath_sim/sim/run_sim.sh:
 # boots the NEORV32 CPU with the ad9361_loopback firmware against the full
 # mpf300 FMCOMMS2 system (axi_ad9361 PolarFire LVDS + SmartHLS adapters +
-# PULP interconnect + open-logic CDC/resets), in Questa Prime 2025.1 (from
+# PULP interconnect + Bedrock-RTL CDC/resets), in Questa Prime 2025.1 (from
 # PATH — NOT the QuestaSim bundled with Libero).
 #
 #  ./run_sim.sh                    # fast (+acc=rn), GUI

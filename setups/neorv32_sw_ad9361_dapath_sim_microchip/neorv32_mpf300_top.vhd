@@ -5,8 +5,9 @@
 -- Identical to deps/hdl/projects/fmcomms2/mpf300/hdl/neorv32_mpf300_top.vhd
 -- (RV32IMC + Zicntr, fast mul/shift, 128 KB IMEM, 32 KB DMEM, UART0, GPIO
 -- 8-in/16-out, SPI, CLINT, XBUS, CLOCK_FREQUENCY = 125 MHz) with ONE
--- addition: CPU_FAST_MUL_PIPELINE => true, enabling the pipelined fast
--- multiplier from neorv32 PR #1603
+-- addition: CPU_FAST_MUL_REG => true, enabling the pipelined fast
+-- multiplier from neorv32 PR #1603 (merged upstream under this name;
+-- earlier drafts called it CPU_FAST_MUL_PIPELINE)
 -- (https://github.com/stnolting/neorv32/pull/1603), which this simulation
 -- verifies via the firmware's mul_selftest() — a wrong-phase multiplier
 -- result fails the test.
@@ -84,7 +85,7 @@ begin
       RISCV_ISA_M       => true,
       RISCV_ISA_Zicntr  => true,
       CPU_FAST_MUL_EN   => true,
-      CPU_FAST_MUL_PIPELINE => true,  -- PR #1603 pipelined fast multiplier
+      CPU_FAST_MUL_REG  => true,  -- PR #1603 pipelined fast multiplier
       CPU_FAST_SHIFT_EN => true,
       IO_UART0_EN       => true,
       IO_UART0_RX_FIFO  => 32,

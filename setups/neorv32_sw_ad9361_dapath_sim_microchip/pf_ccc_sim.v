@@ -57,3 +57,51 @@ module pf_init_monitor_sim (
     end
 
 endmodule
+
+//------------------------------------------------------------------------------
+// PF_CCC_C1 — behavioral stand-in for the second Libero-generated CCC added
+// by the TX FB_CLK phase-pair change (deps/hdl a6df9cdc4): ad_data_clk.v
+// with USE_PLL_90=1 instantiates it BY THIS NAME to derive the 0/90-degree
+// l_clk pair from the AD9361 DATA_CLK (61.44 MHz). Behavioral model:
+// OUT0 follows the reference (0 deg), OUT1 is the reference delayed by a
+// quarter of the measured period (90 deg), lock after 16 reference cycles.
+// Period is re-measured continuously, so the model tracks the TB's clock
+// including the power-gate stop/restart window.
+//------------------------------------------------------------------------------
+
+module PF_CCC_C1 (
+    input  wire PLL_POWERDOWN_N_0,
+    input  wire REF_CLK_0,
+    output wire OUT0_FABCLK_0,
+    output reg  OUT1_FABCLK_0 = 1'b0,
+    output reg  PLL_LOCK_0 = 1'b0
+);
+
+    // 0-degree output: phase-aligned to the reference
+    assign OUT0_FABCLK_0 = REF_CLK_0;
+
+    // measure the reference period
+    realtime t_last = 0.0;
+    realtime period = 0.0;
+    always @(posedge REF_CLK_0) begin
+        if (t_last > 0.0)
+            period <= $realtime - t_last;
+        t_last <= $realtime;
+    end
+
+    // 90-degree output: reference delayed a quarter period (transport)
+    always @(REF_CLK_0)
+        if (period > 0.0)
+            OUT1_FABCLK_0 <= #(period / 4.0) REF_CLK_0;
+
+    // lock after 16 reference cycles
+    reg [4:0] lock_cnt = 5'd0;
+    always @(posedge REF_CLK_0) begin
+        if (PLL_POWERDOWN_N_0 && !PLL_LOCK_0 && period > 0.0) begin
+            lock_cnt <= lock_cnt + 5'd1;
+            if (lock_cnt == 5'd15)
+                PLL_LOCK_0 <= 1'b1;
+        end
+    end
+
+endmodule
