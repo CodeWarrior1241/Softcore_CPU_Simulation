@@ -17,8 +17,8 @@ set vivado_questa_dir "$sim_dir/../NEORV32_Simulation.ip_user_files/sim_scripts/
 # Required Environment Variables
 # ================================================================================
 # XILINX_VIVADO:      Path to Vivado installation (for glbl.v)
-#   Windows: set XILINX_VIVADO=C:\Xilinx\Vivado\2024.2
-#   Linux:   export XILINX_VIVADO=/opt/Xilinx/Vivado/2024.2
+#   Windows: set XILINX_VIVADO=C:\Xilinx\Vivado\<version>
+#   Linux:   export XILINX_VIVADO=/opt/Xilinx/Vivado/<version>
 #
 # XILINX_QUESTA_LIBS: Path to pre-compiled Xilinx simulation libraries
 #   Windows: set XILINX_QUESTA_LIBS=C:\Work\Questa_Libraries_Vivado
@@ -29,7 +29,7 @@ set vivado_questa_dir "$sim_dir/../NEORV32_Simulation.ip_user_files/sim_scripts/
 # ================================================================================
 
 if {![info exists ::env(XILINX_VIVADO)]} {
-    error "XILINX_VIVADO environment variable not set.\n  Set it to point to your Vivado installation.\n  Windows: set XILINX_VIVADO=C:\\Xilinx\\Vivado\\2024.2\n  Linux:   export XILINX_VIVADO=/opt/Xilinx/Vivado/2024.2"
+    error "XILINX_VIVADO environment variable not set.\n  Set it to point to your Vivado installation.\n  Windows: set XILINX_VIVADO=C:\\Xilinx\\Vivado\\<version>\n  Linux:   export XILINX_VIVADO=/opt/Xilinx/Vivado/<version>"
 }
 set XILINX_VIVADO $::env(XILINX_VIVADO)
 

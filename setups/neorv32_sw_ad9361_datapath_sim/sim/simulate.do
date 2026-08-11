@@ -49,24 +49,22 @@ puts "=========================================="
 # Map locally-compiled libraries from Vivado's questa directory
 # ================================================================================
 
-# The compile.do already set sim_dir and vivado_questa_dir
-# Map only the libraries that we compile locally (others come from pre-compiled modelsim.ini)
-vmap xilinx_vip $vivado_questa_dir/questa_lib/msim/xilinx_vip
-vmap xpm $vivado_questa_dir/questa_lib/msim/xpm
-vmap xil_defaultlib $vivado_questa_dir/questa_lib/msim/xil_defaultlib
-vmap proc_sys_reset_v5_0_17 $vivado_questa_dir/questa_lib/msim/proc_sys_reset_v5_0_17
-vmap axi_bram_ctrl_v4_1_13 $vivado_questa_dir/questa_lib/msim/axi_bram_ctrl_v4_1_13
-vmap neorv32 $vivado_questa_dir/questa_lib/msim/neorv32
-vmap util_vector_logic_v2_0_5 $vivado_questa_dir/questa_lib/msim/util_vector_logic_v2_0_5
-vmap smartconnect_v1_0 $vivado_questa_dir/questa_lib/msim/smartconnect_v1_0
-vmap axi_infrastructure_v1_1_0 $vivado_questa_dir/questa_lib/msim/axi_infrastructure_v1_1_0
-vmap axi_register_slice_v2_1_36 $vivado_questa_dir/questa_lib/msim/axi_register_slice_v2_1_36
-vmap axi_vip_v1_1_22 $vivado_questa_dir/questa_lib/msim/axi_vip_v1_1_22
-vmap blk_mem_gen_v8_4_12 $vivado_questa_dir/questa_lib/msim/blk_mem_gen_v8_4_12
-vmap xlslice_v1_0_5 $vivado_questa_dir/questa_lib/msim/xlslice_v1_0_5
-vmap xlconstant_v1_1_10 $vivado_questa_dir/questa_lib/msim/xlconstant_v1_1_10
-vmap axis_infrastructure_v1_1_1 $vivado_questa_dir/questa_lib/msim/axis_infrastructure_v1_1_1
-vmap axis_data_fifo_v2_0_17 $vivado_questa_dir/questa_lib/msim/axis_data_fifo_v2_0_17
+# The compile.do already set sim_dir and vivado_questa_dir.
+# Enumerate the libraries the generated compile.do actually built instead of
+# hardcoding them: the versioned IP library names carry an _NN revision suffix
+# that changes with nearly every Vivado release (e.g. axi_bram_ctrl_v4_1_13 in
+# 2025.2 -> axi_bram_ctrl_v4_1_14 in 2026.1). Pre-compiled libraries (unisims
+# etc.) still come from the modelsim.ini copied by compile.do.
+set local_libs {}
+foreach libdir [lsort [glob -nocomplain -types d -directory $vivado_questa_dir/questa_lib/msim *]] {
+    set lib [file tail $libdir]
+    vmap $lib $libdir
+    lappend local_libs $lib
+}
+if {[llength $local_libs] == 0} {
+    error "simulate.do: no compiled libraries found under $vivado_questa_dir/questa_lib/msim - did compile.do run?"
+}
+puts "INFO: Mapped [llength $local_libs] locally-compiled libraries: $local_libs"
 
 # ================================================================================
 # Elaborate and Load Design
@@ -79,26 +77,18 @@ cd $vivado_questa_dir
 file copy -force $sim_dir/qpsk_bram_data.hex qpsk_bram_data.hex
 
 # Elaborate with optimization for the testbench
-# Include all required Xilinx libraries
-# Use -Lf neorv32 to force component binding to search the neorv32 library
+# The -L switches are generated from the enumerated local libraries (so IP
+# revision bumps between Vivado releases need no edits here); xil_defaultlib
+# stays first and neorv32 keeps its -Lf forced component binding.
+set L_args {}
+foreach lib $local_libs {
+    if {$lib eq "xil_defaultlib" || $lib eq "neorv32"} { continue }
+    lappend L_args -L $lib
+}
 vopt -l elaborate.log $acc_flag -suppress 10016 \
     -L xil_defaultlib \
-    -L xilinx_vip \
-    -L xpm \
-    -L xpm_cdc_gen_v1_0_5 \
+    {*}$L_args \
     -Lf neorv32 \
-    -L proc_sys_reset_v5_0_17 \
-    -L util_vector_logic_v2_0_5 \
-    -L smartconnect_v1_0 \
-    -L axi_infrastructure_v1_1_0 \
-    -L axi_register_slice_v2_1_36 \
-    -L axi_vip_v1_1_22 \
-    -L axi_bram_ctrl_v4_1_13 \
-    -L blk_mem_gen_v8_4_12 \
-    -L xlslice_v1_0_5 \
-    -L xlconstant_v1_1_10 \
-    -L axis_infrastructure_v1_1_1 \
-    -L axis_data_fifo_v2_0_17 \
     -L unisims_ver \
     -L unimacro_ver \
     -L secureip \

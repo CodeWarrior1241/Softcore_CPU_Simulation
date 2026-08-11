@@ -3,7 +3,7 @@
 # Top-level build script for simulation-only project with AD9361 datapath
 #
 # Usage (from Vivado TCL console):
-#   cd {C:/Work/Sandbox/QPSK_Triple_Comparison/deps/neorv32/setups/neorv32_sw_ad9361_datapath_sim}
+#   cd {path/to/deps/neorv32/setups/neorv32_sw_ad9361_datapath_sim}
 #   source build_all.tcl
 #   build_all
 #
@@ -22,6 +22,50 @@ variable project_name "NEORV32_Simulation"
 variable part "xcau15p-ffvb676-2-e"
 variable project_dir [file normalize [file dirname [info script]]]
 variable top_level_bd_name "Top"
+
+###############################################################################
+# IP version resolution
+###############################################################################
+#
+# create_bd_cell needs a fully-versioned VLNV, but Xilinx bumps IP major.minor
+# versions between Vivado releases, and re-exported user IP (NEORV32, ADI, HLS)
+# can move too. Resolve the version against the IP catalog at build time:
+# prefer the version this script was validated with, otherwise fall back to the
+# newest version in the catalog with a warning. This keeps the script working
+# across Vivado releases (e.g. 2025.2 -> 2026.1) without editing every
+# create_bd_cell call.
+#
+proc resolve_ip_vlnv {vlnv_base {validated_version ""}} {
+    # Exact match on the validated version, if the catalog still ships it
+    if {$validated_version ne ""} {
+        set exact [get_ipdefs -quiet "${vlnv_base}:${validated_version}"]
+        if {[llength $exact] > 0} {
+            return [lindex $exact 0]
+        }
+    }
+
+    # Fall back to the newest version present in the catalog
+    set defs [get_ipdefs -quiet "${vlnv_base}:*"]
+    if {[llength $defs] == 0} {
+        error "resolve_ip_vlnv: no IP matching '${vlnv_base}:*' in the IP\
+ catalog. Check that the required IP repositories are set up and the catalog\
+ is up to date."
+    }
+    set best ""
+    set best_version ""
+    foreach def $defs {
+        set version [lindex [split $def ":"] 3]
+        if {$best eq "" || [package vcompare $version $best_version] > 0} {
+            set best $def
+            set best_version $version
+        }
+    }
+    if {$validated_version ne ""} {
+        puts "WARNING: ${vlnv_base}:${validated_version} not found in the IP\
+ catalog; using $best instead."
+    }
+    return $best
+}
 
 ###############################################################################
 # Block design component names
@@ -80,7 +124,7 @@ proc check_board_files {} {
         puts ""
         puts "     WINDOWS (requires admin privileges):"
         puts "       Copy to: <Vivado_Install>/data/boards/board_files/"
-        puts "       Example: C:\\Xilinx\\Vivado\\2025.2\\data\\boards\\board_files\\aub15p"
+        puts "       Example: C:\\Xilinx\\Vivado\\<version>\\data\\boards\\board_files\\aub15p"
         puts ""
         puts "     WINDOWS (user-specific, no admin required):"
         puts "       Copy to: %APPDATA%\\Xilinx\\Vivado\\board_files\\"
@@ -88,7 +132,7 @@ proc check_board_files {} {
         puts ""
         puts "     LINUX (system-wide):"
         puts "       Copy to: <Vivado_Install>/data/boards/board_files/"
-        puts "       Example: /opt/Xilinx/Vivado/2025.2/data/boards/board_files/aub15p"
+        puts "       Example: /opt/Xilinx/Vivado/<version>/data/boards/board_files/aub15p"
         puts ""
         puts "     LINUX (user-specific, no admin required):"
         puts "       Copy to: ~/.Xilinx/Vivado/board_files/"
@@ -128,7 +172,7 @@ proc build_all {} {
         puts ""
         puts "  Set it to point to the ADI HDL IP library root:"
         puts ""
-        puts "    Windows: set ADI_IP_LOCATION=C:\\Work\\QPSK_Triple_Comparison\\deps\\hdl\\library"
+        puts "    Windows: set ADI_IP_LOCATION=C:\\path\\to\\QPSK_Triple_Comparison\\deps\\hdl\\library"
         puts "    Linux:   export ADI_IP_LOCATION=/path/to/deps/hdl/library"
         puts ""
         puts "  The ADI library IPs must be built first:"
@@ -370,11 +414,11 @@ foreach p [get_property ip_repo_paths [current_project]] {
 }
 
 # Reopen the block design
-open_bd_design ./$project_name.srcs/$synth_sources_name/bd/$top_level_bd_name/$top_level_bd_name.bd
+open_bd_design $project_dir/$project_name.srcs/$synth_sources_name/bd/$top_level_bd_name/$top_level_bd_name.bd
 
 # Instantiate NEORV32 in block design
 puts "INFO: Instantiating NEORV32 in block design..."
-create_bd_cell -type ip -vlnv NEORV32:user:neorv32_vivado_ip:1.0 $neorv32_cpu
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv NEORV32:user:neorv32_vivado_ip 1.0] $neorv32_cpu
 
 # Configure NEORV32 for AU15P / FMCOMMS4 application
 set_property -dict [list \
@@ -408,7 +452,7 @@ set_property -dict [list \
 puts "INFO: NEORV32 configured (RV32IMC, 32KB IMEM, 16KB DMEM, TRACER enabled)"
 
 # Add board clock input and MMCM
-create_bd_cell -type ip -vlnv xilinx.com:ip:clk_wiz:6.0 $sitime_300_mhz
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:clk_wiz 6.0] $sitime_300_mhz
 set_property -dict [list \
     CONFIG.AUTO_PRIMITIVE {PLL} \
     CONFIG.CLKOUT1_REQUESTED_OUT_FREQ {150.000} \
@@ -453,10 +497,10 @@ startgroup
 endgroup
 
 # Create reset and clocking
-create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 $cpu_sys_reset
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:proc_sys_reset 5.0] $cpu_sys_reset
 
 # Create inverter for the NEORV32 active low input reset
-create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 $neorv32_cpu_input_reset
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:util_vector_logic 2.0] $neorv32_cpu_input_reset
 set_property -dict [list \
     CONFIG.C_OPERATION {not} \
     CONFIG.C_SIZE {1} \
@@ -476,17 +520,17 @@ set_property -dict [list \
 ###############################################################################
 
 # pwr_dn: slice bit 8 out of the now-16-bit gpio_o bus.
-create_bd_cell -type ip -vlnv xilinx.com:ip:xlslice:1.0 gpio_pwr_dn_slice
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:xlslice 1.0] gpio_pwr_dn_slice
 set_property -dict [list CONFIG.DIN_WIDTH {16} CONFIG.DIN_FROM {8} CONFIG.DIN_TO {8}] [get_bd_cells gpio_pwr_dn_slice]
 connect_bd_net [get_bd_pins $neorv32_cpu/gpio_o] [get_bd_pins gpio_pwr_dn_slice/Din]
 
 # pwr_dn_n = NOT pwr_dn (clock-enable / active-low-reset sense)
-create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 pwr_dn_inv
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:util_vector_logic 2.0] pwr_dn_inv
 set_property -dict [list CONFIG.C_OPERATION {not} CONFIG.C_SIZE {1}] [get_bd_cells pwr_dn_inv]
 connect_bd_net [get_bd_pins gpio_pwr_dn_slice/Dout] [get_bd_pins pwr_dn_inv/Op1]
 
 # aresetn_gated = peripheral_aresetn AND pwr_dn_n (active-low, 150 MHz domain)
-create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 pwr_dn_aresetn_gate
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:util_vector_logic 2.0] pwr_dn_aresetn_gate
 set_property -dict [list CONFIG.C_OPERATION {and} CONFIG.C_SIZE {1}] [get_bd_cells pwr_dn_aresetn_gate]
 connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins pwr_dn_aresetn_gate/Op1]
 connect_bd_net [get_bd_pins pwr_dn_inv/Res] [get_bd_pins pwr_dn_aresetn_gate/Op2]
@@ -505,7 +549,7 @@ endgroup
 
 # Create the main AXI CPU interconnect
 # NUM_MI = 3: BRAM controller, axi_ad9361, axi_streaming_adapter
-create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 $axi_cpu_interconnect
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:smartconnect 1.0] $axi_cpu_interconnect
 set_property -dict [list \
     CONFIG.NUM_MI {3} \
     CONFIG.NUM_SI {1} \
@@ -516,11 +560,11 @@ set_property -dict [list \
 ###############################################################################
 
 # Create the AXI BRAM controller and the BRAM block itself
-create_bd_cell -type ip -vlnv xilinx.com:ip:axi_bram_ctrl:4.1 $axi_bram_controller
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:axi_bram_ctrl 4.1] $axi_bram_controller
 set_property CONFIG.SINGLE_PORT_BRAM {1} [get_bd_cells $axi_bram_controller]
 set_property CONFIG.READ_LATENCY {2} [get_bd_cells $axi_bram_controller]
 set_property CONFIG.PROTOCOL {AXI4} [get_bd_cells $axi_bram_controller]
-create_bd_cell -type ip -vlnv xilinx.com:ip:blk_mem_gen:8.4 $qpsk_snapshot_bram
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:blk_mem_gen 8.4] $qpsk_snapshot_bram
 set_property -dict [list CONFIG.Enable_32bit_Address.VALUE_SRC PROPAGATED] [get_bd_cells $qpsk_snapshot_bram]
 
 # Load the BRAM initialization file
@@ -548,7 +592,7 @@ set_property -dict [list \
 puts "INFO: Instantiating AD9361 core and datapath..."
 
 # Create AD9361 core
-create_bd_cell -type ip -vlnv analog.com:user:axi_ad9361:1.0 $axi_ad9361
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv analog.com:user:axi_ad9361 1.0] $axi_ad9361
 set_property -dict [list \
     CONFIG.ID {0} \
     CONFIG.DAC_DDS_TYPE {1} \
@@ -660,7 +704,7 @@ connect_bd_net [get_bd_ports txnrx] [get_bd_pins $axi_ad9361/txnrx]
 
 # Connect delay_clk for IODELAY calibration
 # Tie off tdd_sync (TDD not used — running FDD mode)
-create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 tdd_sync_const
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:xlconstant 1.1] tdd_sync_const
 set_property -dict [list CONFIG.CONST_VAL {0} CONFIG.CONST_WIDTH {1}] [get_bd_cells tdd_sync_const]
 connect_bd_net [get_bd_pins tdd_sync_const/dout] [get_bd_pins $axi_ad9361/tdd_sync]
 
@@ -680,9 +724,9 @@ connect_bd_net [get_bd_pins pwr_dn_aresetn_gate/Res] [get_bd_pins $axi_ad9361/s_
 # Connect up_enable and up_txnrx from NEORV32 GPIO
 # GPIO[0] = up_enable, GPIO[1] = up_txnrx
 # Create slice for GPIO bits
-create_bd_cell -type ip -vlnv xilinx.com:ip:xlslice:1.0 gpio_up_enable_slice
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:xlslice 1.0] gpio_up_enable_slice
 set_property -dict [list CONFIG.DIN_WIDTH {16} CONFIG.DIN_FROM {0} CONFIG.DIN_TO {0}] [get_bd_cells gpio_up_enable_slice]
-create_bd_cell -type ip -vlnv xilinx.com:ip:xlslice:1.0 gpio_up_txnrx_slice
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:xlslice 1.0] gpio_up_txnrx_slice
 set_property -dict [list CONFIG.DIN_WIDTH {16} CONFIG.DIN_FROM {1} CONFIG.DIN_TO {1}] [get_bd_cells gpio_up_txnrx_slice]
 
 connect_bd_net [get_bd_pins $neorv32_cpu/gpio_o] [get_bd_pins gpio_up_enable_slice/Din]
@@ -697,7 +741,7 @@ connect_bd_net [get_bd_pins gpio_up_txnrx_slice/Dout] [get_bd_pins $axi_ad9361/u
 puts "INFO: Creating l_clk domain reset synchronizer..."
 
 # Reset synchronizer for l_clk domain (used by HLS adapter datapath)
-create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 $util_ad9361_lclk_reset
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:proc_sys_reset 5.0] $util_ad9361_lclk_reset
 connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins $util_ad9361_lclk_reset/ext_reset_in]
 connect_bd_net [get_bd_pins $axi_ad9361/l_clk] [get_bd_pins $util_ad9361_lclk_reset/slowest_sync_clk]
 
@@ -711,7 +755,7 @@ connect_bd_net [get_bd_pins $axi_ad9361/l_clk] [get_bd_pins $util_ad9361_lclk_re
 # pwr_dn only after the clock is back) the adapter + RX FIFO restart from a clean
 # reset instead of resuming a frozen mid-burst state.
 set_property -dict [list CONFIG.C_AUX_RESET_HIGH {1}] [get_bd_cells $util_ad9361_lclk_reset]
-create_bd_cell -type ip -vlnv xilinx.com:ip:xpm_cdc_gen:1.0 pwr_dn_lclk_sync
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:xpm_cdc_gen 1.0] pwr_dn_lclk_sync
 set_property -dict [list \
     CONFIG.CDC_TYPE {xpm_cdc_single} \
     CONFIG.WIDTH {1} \
@@ -735,7 +779,7 @@ connect_bd_net [get_bd_pins pwr_dn_lclk_sync/dest_out] [get_bd_pins $util_ad9361
 puts "INFO: Instantiating AXI AD9361 Adapter..."
 
 # Create the HLS adapter IP
-create_bd_cell -type ip -vlnv user:hls:axi_ad9361_adapter:5.0 $axi_ad9361_adapter
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv user:hls:axi_ad9361_adapter 5.0] $axi_ad9361_adapter
 
 # Connect adapter clock and reset (l_clk domain, 125 MHz)
 connect_bd_net [get_bd_pins $axi_ad9361/l_clk] [get_bd_pins $axi_ad9361_adapter/ap_clk]
@@ -761,7 +805,7 @@ connect_bd_net [get_bd_pins $axi_ad9361/adc_valid_q1] [get_bd_pins $axi_ad9361_a
 # ADC overflow handling
 # Note: Both axi_ad9361 and adapter have adc_dovf as INPUTS (from external FIFO in ADI designs)
 # In our simplified design without external FIFOs, tie to constant 0 (no overflow source)
-create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 adc_dovf_const
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:xlconstant 1.1] adc_dovf_const
 set_property -dict [list CONFIG.CONST_VAL {0} CONFIG.CONST_WIDTH {1}] [get_bd_cells adc_dovf_const]
 connect_bd_net [get_bd_pins adc_dovf_const/dout] [get_bd_pins $axi_ad9361/adc_dovf]
 connect_bd_net [get_bd_pins adc_dovf_const/dout] [get_bd_pins $axi_ad9361_adapter/adc_dovf]
@@ -801,7 +845,7 @@ connect_bd_net [get_bd_pins $axi_ad9361_adapter/dac_dunf] [get_bd_pins $axi_ad93
 
 puts "INFO: Instantiating AXI-Lite to Streaming Adapter..."
 
-create_bd_cell -type ip -vlnv user:hls:axi_lite_to_streaming_adapter:1.0 $axi_streaming_adapter
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv user:hls:axi_lite_to_streaming_adapter 1.0] $axi_streaming_adapter
 
 # Connect adapter clock and reset (150 MHz AXI domain)
 connect_bd_net [get_bd_pins $sitime_300_mhz/clk_out1] [get_bd_pins $axi_streaming_adapter/ap_clk]
@@ -816,7 +860,7 @@ connect_bd_net [get_bd_pins $cpu_sys_reset/peripheral_aresetn] [get_bd_pins $axi
 puts "INFO: Instantiating AXI-Stream CDC FIFOs..."
 
 # TX CDC FIFO: axi_streaming_adapter (150 MHz) -> ad9361_adapter (125 MHz l_clk)
-create_bd_cell -type ip -vlnv xilinx.com:ip:axis_data_fifo:2.0 $ad9361_cdc_tx_streaming_fifo
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:axis_data_fifo 2.0] $ad9361_cdc_tx_streaming_fifo
 set_property -dict [list CONFIG.HAS_TLAST.VALUE_SRC USER] [get_bd_cells $ad9361_cdc_tx_streaming_fifo]
 set_property -dict [list \
     CONFIG.FIFO_DEPTH {256} \
@@ -837,7 +881,7 @@ connect_bd_intf_net [get_bd_intf_pins $axi_streaming_adapter/tx_stream]      [ge
 connect_bd_intf_net [get_bd_intf_pins $ad9361_cdc_tx_streaming_fifo/M_AXIS]  [get_bd_intf_pins $axi_ad9361_adapter/tx_stream]
 
 # RX CDC FIFO: ad9361_adapter (125 MHz l_clk) -> axi_streaming_adapter (150 MHz)
-create_bd_cell -type ip -vlnv xilinx.com:ip:axis_data_fifo:2.0 $ad9361_cdc_rx_streaming_fifo
+create_bd_cell -type ip -vlnv [resolve_ip_vlnv xilinx.com:ip:axis_data_fifo 2.0] $ad9361_cdc_rx_streaming_fifo
 set_property -dict [list CONFIG.HAS_TLAST.VALUE_SRC USER] [get_bd_cells $ad9361_cdc_rx_streaming_fifo]
 set_property -dict [list \
     CONFIG.FIFO_DEPTH {256} \
@@ -998,84 +1042,135 @@ return 0
 ###############################################################################
 #
 # Vivado's export_simulation command generates compile.do scripts that don't
-# properly handle library dependencies for certain Xilinx IP. Specifically:
+# properly handle library dependencies for certain Xilinx IP. Specifically,
+# the IP static sources
 #
-#   - axi_bram_ctrl_v4_1_rfs.vhd must be compiled into axi_bram_ctrl_v4_1_13
-#   - proc_sys_reset_v5_0_vh_rfs.vhd must be compiled into proc_sys_reset_v5_0_17
+#   - axi_bram_ctrl_v4_1/hdl/axi_bram_ctrl_v4_1_rfs.vhd
+#   - proc_sys_reset_v5_0/hdl/proc_sys_reset_v5_0_vh_rfs.vhd
+#     (renamed to proc_sys_reset_v5_0_rfs.vhd in Vivado 2026.1; both names
+#     are accepted below)
 #
-# Without this fix, Questa reports errors like:
+# are compiled into xil_defaultlib, while the generated BD IP wrappers
+# reference them through their versioned libraries (axi_bram_ctrl_v4_1_NN /
+# proc_sys_reset_v5_0_NN). Without this fix, Questa reports errors like:
 #   "Recompile axi_bram_ctrl_v4_1_13.axi_bram_ctrl because xpm.vcomponents has changed"
 #   "Cannot find expanded name axi_bram_ctrl_v4_1_13.axi_bram_ctrl"
 #
-# This proc patches the generated compile.do to add proper library mappings.
+# This proc patches the generated compile.do to compile those sources into
+# their versioned libraries. Nothing release- or checkout-specific is
+# hardcoded here:
+#   - the versioned library names (the _NN suffix is an IP revision that moves
+#     with nearly every Vivado release) are discovered from the -L switches in
+#     the generated elaborate.do, and
+#   - the rfs.vhd source paths (which encode the Vivado install location and
+#     the checkout's directory depth relative to it) are taken verbatim from
+#     the generated compile.do, anchored on the install-tree tail
+#     data/ip/xilinx/...
+# Any anchor that fails to match is a hard error, so a format change stops
+# the build here instead of failing later inside Questa elaboration.
 ###############################################################################
 
 proc fix_questa_compile_do {project_dir} {
-    set compile_do "$project_dir/NEORV32_Simulation.ip_user_files/sim_scripts/questa/compile.do"
+    set questa_dir "$project_dir/NEORV32_Simulation.ip_user_files/sim_scripts/questa"
+    set compile_do "$questa_dir/compile.do"
+    set elaborate_do "$questa_dir/elaborate.do"
 
     if {![file exists $compile_do]} {
-        puts "WARNING: compile.do not found at $compile_do"
+        puts "WARNING: compile.do not found at $compile_do (no Questa scripts exported; skipping patch)"
         return
     }
+    if {![file exists $elaborate_do]} {
+        error "fix_questa_compile_do: elaborate.do not found at $elaborate_do"
+    }
 
-    puts "Patching Questa compile.do for proper library dependencies..."
+    # Discover the versioned library names from elaborate.do's -L switches
+    set fp [open $elaborate_do r]
+    set elab [read $fp]
+    close $fp
+    if {![regexp {axi_bram_ctrl_v4_1_\d+} $elab axi_bram_ctrl_lib]} {
+        error "fix_questa_compile_do: no axi_bram_ctrl_v4_1_* library reference found in $elaborate_do"
+    }
+    if {![regexp {proc_sys_reset_v5_0_\d+} $elab proc_sys_reset_lib]} {
+        error "fix_questa_compile_do: no proc_sys_reset_v5_0_* library reference found in $elaborate_do"
+    }
 
-    # Read the original file
     set fp [open $compile_do r]
     set content [read $fp]
     close $fp
 
     # Check if already patched
-    if {[string match "*vlib questa_lib/msim/axi_bram_ctrl_v4_1_13*" $content]} {
+    if {[string match "*vlib questa_lib/msim/$axi_bram_ctrl_lib*" $content]} {
         puts "  compile.do already patched, skipping"
         return
     }
 
-    # Add library creation commands after the existing vlib commands
-    set old_vlib_block {vlib questa_lib/msim/xil_defaultlib}
-    set new_vlib_block {vlib questa_lib/msim/xil_defaultlib
-vlib questa_lib/msim/axi_bram_ctrl_v4_1_13
-vlib questa_lib/msim/proc_sys_reset_v5_0_17}
+    puts "Patching Questa compile.do for proper library dependencies..."
+    puts "  Versioned libraries: $axi_bram_ctrl_lib, $proc_sys_reset_lib"
 
-    set content [string map [list $old_vlib_block $new_vlib_block] $content]
+    # Locate the two rfs sources exactly as export_simulation wrote them
+    if {![regexp {"([^"]*data/ip/xilinx/axi_bram_ctrl_v4_1/hdl/axi_bram_ctrl_v4_1_rfs\.vhd)"} $content -> axi_bram_ctrl_rfs]} {
+        error "fix_questa_compile_do: axi_bram_ctrl_v4_1_rfs.vhd not referenced in $compile_do"
+    }
+    if {![regexp {"([^"]*data/ip/xilinx/proc_sys_reset_v5_0/hdl/proc_sys_reset_v5_0(?:_vh)?_rfs\.vhd)"} $content -> proc_sys_reset_rfs]} {
+        error "fix_questa_compile_do: proc_sys_reset_v5_0_rfs.vhd (or _vh_rfs) not referenced in $compile_do"
+    }
 
-    # Add vmap commands after existing vmaps
-    set old_vmap_block {vmap xil_defaultlib questa_lib/msim/xil_defaultlib}
-    set new_vmap_block {vmap xil_defaultlib questa_lib/msim/xil_defaultlib
-vmap axi_bram_ctrl_v4_1_13 questa_lib/msim/axi_bram_ctrl_v4_1_13
-vmap proc_sys_reset_v5_0_17 questa_lib/msim/proc_sys_reset_v5_0_17}
+    # Remove the two rfs sources from their xil_defaultlib vcom block(s). If a
+    # removed line terminated a vcom block, strip the continuation backslash
+    # from the previous line so the block stays well-formed.
+    set out {}
+    foreach line [split $content "\n"] {
+        if {[string match "*axi_bram_ctrl_v4_1_rfs.vhd*" $line] || \
+            [string match "*proc_sys_reset_v5_0*_rfs.vhd*" $line]} {
+            if {![string match {*\\} [string trimright $line]]} {
+                set prev [lindex $out end]
+                set out [lreplace $out end end [string trimright $prev " \\"]]
+            }
+            continue
+        }
+        lappend out $line
+    }
 
-    set content [string map [list $old_vmap_block $new_vmap_block] $content]
+    # Find the insertion anchors
+    set vlib_idx -1
+    set vmap_idx -1
+    set vcom_idx -1
+    for {set i 0} {$i < [llength $out]} {incr i} {
+        set l [string trim [lindex $out $i]]
+        if {$vlib_idx < 0 && $l eq "vlib questa_lib/msim/xil_defaultlib"} { set vlib_idx $i }
+        if {$vmap_idx < 0 && $l eq "vmap xil_defaultlib questa_lib/msim/xil_defaultlib"} { set vmap_idx $i }
+        if {$vcom_idx < 0 && [string match "vcom *" $l]} { set vcom_idx $i }
+    }
+    if {$vlib_idx < 0 || $vmap_idx < 0 || $vcom_idx < 0 || $vmap_idx < $vlib_idx || $vcom_idx < $vmap_idx} {
+        error "fix_questa_compile_do: compile.do layout not recognized\
+ (vlib/vmap/vcom anchors not found in the expected order); Vivado may have\
+ changed the export_simulation format - update this proc."
+    }
 
-    # Fix the VHDL compilation: split out the library files into their own libraries
-    # Original pattern compiles everything into xil_defaultlib
-    # We need to compile axi_bram_ctrl and proc_sys_reset into their own libraries first
-
-    # Find and replace the vcom block that has axi_bram_ctrl_v4_1_rfs.vhd
-    set old_vcom_pattern {vcom -work xil_defaultlib  -93  \
-"../../../../../../../../Xilinx/2025.2/Vivado/data/ip/xilinx/axi_bram_ctrl_v4_1/hdl/axi_bram_ctrl_v4_1_rfs.vhd" \
-"../../../NEORV32_Simulation.gen/sources_1/bd/Top/ip/Top_AXI_BRAM_Controller_0/sim/Top_AXI_BRAM_Controller_0.vhd" \
-"../../../../../../../../Xilinx/2025.2/Vivado/data/ip/xilinx/proc_sys_reset_v5_0/hdl/proc_sys_reset_v5_0_vh_rfs.vhd" \
-"../../../NEORV32_Simulation.gen/sources_1/bd/Top/ip/Top_AXI_CPU_Interconnect_0/bd_0/ip/ip_1/sim/bd_e51e_psr_aclk_0.vhd"}
-
-    set new_vcom_pattern {# Compile AXI BRAM Controller library (must be in its own library)
-vcom -work axi_bram_ctrl_v4_1_13  -93  \
-"../../../../../../../../Xilinx/2025.2/Vivado/data/ip/xilinx/axi_bram_ctrl_v4_1/hdl/axi_bram_ctrl_v4_1_rfs.vhd"
-
-# Compile proc_sys_reset library (must be in its own library)
-vcom -work proc_sys_reset_v5_0_17  -93  \
-"../../../../../../../../Xilinx/2025.2/Vivado/data/ip/xilinx/proc_sys_reset_v5_0/hdl/proc_sys_reset_v5_0_vh_rfs.vhd"
-
-# Compile design files that use the above libraries
-vcom -work xil_defaultlib  -93  \
-"../../../NEORV32_Simulation.gen/sources_1/bd/Top/ip/Top_AXI_BRAM_Controller_0/sim/Top_AXI_BRAM_Controller_0.vhd" \
-"../../../NEORV32_Simulation.gen/sources_1/bd/Top/ip/Top_AXI_CPU_Interconnect_0/bd_0/ip/ip_1/sim/bd_e51e_psr_aclk_0.vhd"}
-
-    set content [string map [list $old_vcom_pattern $new_vcom_pattern] $content]
+    # Insert from the highest index down so earlier indices stay valid:
+    # the versioned-library vcom blocks go ahead of the first vcom (so they
+    # compile before any file that references them), then the vmap and vlib
+    # pairs go after their existing xil_defaultlib counterparts.
+    set out [linsert $out $vcom_idx \
+        "" \
+        "# Compile IP static sources into their versioned libraries (patched in by" \
+        "# fix_questa_compile_do; export_simulation puts them in xil_defaultlib)" \
+        "vcom -work $axi_bram_ctrl_lib  -93  \\" \
+        "\"$axi_bram_ctrl_rfs\"" \
+        "" \
+        "vcom -work $proc_sys_reset_lib  -93  \\" \
+        "\"$proc_sys_reset_rfs\"" \
+        ""]
+    set out [linsert $out [expr {$vmap_idx + 1}] \
+        "vmap $axi_bram_ctrl_lib questa_lib/msim/$axi_bram_ctrl_lib" \
+        "vmap $proc_sys_reset_lib questa_lib/msim/$proc_sys_reset_lib"]
+    set out [linsert $out [expr {$vlib_idx + 1}] \
+        "vlib questa_lib/msim/$axi_bram_ctrl_lib" \
+        "vlib questa_lib/msim/$proc_sys_reset_lib"]
 
     # Write back the patched file
     set fp [open $compile_do w]
-    puts -nonewline $fp $content
+    puts -nonewline $fp [join $out "\n"]
     close $fp
 
     puts "  compile.do patched successfully"
