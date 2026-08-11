@@ -46,8 +46,12 @@ end entity;
 architecture neorv32_prim_fifo_rtl of neorv32_prim_fifo is
 
   -- memory core --
+  -- [NOTE] The memory array is declared inside each of the two mutually
+  -- exclusive memory_* generate branches (not at architecture scope):
+  -- a single architecture-scope signal driven from two generate branches
+  -- defeats RAM extraction on Verific-based synthesis front-ends (e.g.
+  -- Efinix Efinity), collapsing the FIFO storage into discrete registers.
   type ram_t is array ((2**AWIDTH)-1 downto 0) of std_ulogic_vector(DWIDTH-1 downto 0);
-  signal fifo : ram_t;
 
   -- local signals --
   signal rdata : std_ulogic_vector(DWIDTH-1 downto 0);
@@ -115,6 +119,8 @@ begin
   -- more than 1 FIFO entry --
   memory_large:
   if (AWIDTH > 0) generate
+    signal fifo : ram_t; -- declared per-branch; see note above
+  begin
     memory_core: process(clk_i) -- simple dual-port RAM
     begin
       if rising_edge(clk_i) then
@@ -129,6 +135,8 @@ begin
   -- just 1 FIFO entry --
   memory_small:
   if (AWIDTH = 0) generate
+    signal fifo : ram_t; -- declared per-branch; see note above
+  begin
     memory_core: process(rstn_i, clk_i) -- single register
     begin
       if (rstn_i = '0') then
@@ -185,8 +193,12 @@ end entity;
 
 architecture neorv32_prim_spram_rtl of neorv32_prim_spram is
 
+  -- [NOTE] The memory array is declared inside each of the two mutually
+  -- exclusive memory_* generate branches (not at architecture scope):
+  -- a single architecture-scope signal driven from two generate branches
+  -- defeats RAM extraction on Verific-based synthesis front-ends (e.g.
+  -- Efinix Efinity), collapsing the RAM into discrete registers.
   type ram_t is array ((2**AWIDTH)-1 downto 0) of std_ulogic_vector(DWIDTH-1 downto 0);
-  signal spram : ram_t;
   signal rdata : std_ulogic_vector(DWIDTH-1 downto 0);
 
 begin
@@ -195,6 +207,8 @@ begin
   -- -------------------------------------------------------------------------------------------
   memory_large:
   if (AWIDTH > 0) generate
+    signal spram : ram_t; -- declared per-branch; see note above
+  begin
     memory_core: process(clk_i)
     begin
       if rising_edge(clk_i) then
@@ -211,6 +225,8 @@ begin
   -- single entry only --
   memory_small:
   if (AWIDTH = 0) generate
+    signal spram : ram_t; -- declared per-branch; see note above
+  begin
     memory_core: process(clk_i)
     begin
       if rising_edge(clk_i) then
