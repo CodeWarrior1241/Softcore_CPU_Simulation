@@ -23,8 +23,8 @@
 #define NUM_RX_SAMPLES     1024
 
 /* Command strings */
-#define CMD_ENABLE_RF       "enable_rf"
-#define CMD_DISABLE_RF      "disable_rf"
+#define CMD_ENABLE_RF       "enable_rf"      /* ENSM -> FDD   (RF on air) */
+#define CMD_DISABLE_RF      "disable_rf"     /* ENSM -> ALERT (LOs + TX PA off) */
 #define CMD_ENABLE_SNAPSHOT "enable_snapshot"
 #define CMD_GET_STATUS      "get_status"
 #define CMD_GET_ADC_STATUS  "get_adc_status"
@@ -1330,10 +1330,15 @@ int main(void)
 			     (unsigned)QPSK_TX_NUM_SAMPLES);
 	neorv32_uart0_puts("[ad9361_no-os] Bridge running (TX complete, RX capturing)\n");
 
-	/* 8. Assert up_enable and up_txnrx (data path enable) */
+	/* 8. Assert the chip's ENABLE/TXNRX pins via axi_ad9361's up_enable /
+	 * up_txnrx. These reach package pins C14/C15 (FMC LA16_P/N) but do NOT
+	 * gate the fabric datapath -- that is bridge_enable() above -- and the
+	 * chip ignores them while ENABLE_ENSM_PIN_CTRL is clear (SPI-controlled
+	 * ENSM, step 5). Held high so the pins agree with ENSM=FDD. */
 	neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 1);
 	neorv32_gpio_pin_set(GPIO_UP_TXNRX_PIN, 1);
-	neorv32_uart0_puts("[ad9361_no-os] Data path enabled (up_enable=1, up_txnrx=1)\n");
+	rf_enabled = 1;
+	neorv32_uart0_puts("[ad9361_no-os] ENABLE/TXNRX pins asserted (up_enable=1, up_txnrx=1)\n");
 
 	/* 9. Read back LO frequencies */
 	ad9361_get_rx_lo_freq(phy, &rx_lo);
@@ -1406,16 +1411,43 @@ int main(void)
 			continue;
 
 		if (strcmp_cmd(cmd_buffer, CMD_ENABLE_RF)) {
+			/* Drive the chip's ENSM over SPI: ALERT -> FDD relocks the RX/TX
+			 * synthesizers and brings the TX path back on air.
+			 *
+			 * The GPIO writes below are kept so the ENABLE/TXNRX pins track
+			 * the commanded state, but they are NOT what gates the RF: this
+			 * design leaves ENABLE_ENSM_PIN_CTRL clear in REG_ENSM_CONFIG_1
+			 * (SPI-controlled ENSM, set by ad9361_set_en_state_machine_mode()
+			 * during boot), so the chip ignores those pins. Toggling them
+			 * alone -- which is all this handler used to do -- changed
+			 * nothing on the air. See pinctl_rx/pinctl_off for the
+			 * pin-controlled variant. */
+			if (!power_state) { neorv32_uart0_puts("powered_down\n"); continue; }
 			neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 1);
 			neorv32_gpio_pin_set(GPIO_UP_TXNRX_PIN, 1);
-			rf_enabled = 1;
-			neorv32_uart0_puts(RESP_RF_ENABLED);
+			ret = ad9361_set_en_state_machine_mode(phy, ENSM_MODE_FDD);
+			if (ret) {
+				neorv32_uart0_printf("rf_enable_failed ret=%d\n", (int)ret);
+			} else {
+				rf_enabled = 1;
+				neorv32_uart0_puts(RESP_RF_ENABLED);
+			}
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_DISABLE_RF)) {
-			neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 0);
-			neorv32_gpio_pin_set(GPIO_UP_TXNRX_PIN, 0);
-			rf_enabled = 0;
-			neorv32_uart0_puts(RESP_RF_DISABLED);
+			/* ENSM -> ALERT: TX PA and both LOs off, chip stays configured
+			 * and calibrated so enable_rf is a fast, deterministic return
+			 * (no re-init, no re-cal). This is the same state power_down
+			 * transits through before dropping to SLEEP. */
+			if (!power_state) { neorv32_uart0_puts("powered_down\n"); continue; }
+			ret = ad9361_set_en_state_machine_mode(phy, ENSM_MODE_ALERT);
+			if (ret) {
+				neorv32_uart0_printf("rf_disable_failed ret=%d\n", (int)ret);
+			} else {
+				neorv32_gpio_pin_set(GPIO_UP_ENABLE_PIN, 0);
+				neorv32_gpio_pin_set(GPIO_UP_TXNRX_PIN, 0);
+				rf_enabled = 0;
+				neorv32_uart0_puts(RESP_RF_DISABLED);
+			}
 
 		} else if (strcmp_cmd(cmd_buffer, CMD_ENABLE_SNAPSHOT)) {
 			if (!power_state) { neorv32_uart0_puts("powered_down\n"); continue; }
