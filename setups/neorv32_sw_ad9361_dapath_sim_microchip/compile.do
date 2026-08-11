@@ -19,7 +19,8 @@
 #
 # Environment (optional):
 #   LIBERO_INSTALL_DIR   Libero_SoC install dir (for the PolarFire primitive
-#                        source only; default below)
+#                        source only; common install roots are probed when
+#                        unset -- see below)
 # ================================================================================
 
 quit -sim
@@ -42,11 +43,32 @@ set hls_stream "$repo_root/src/axi_lite_to_streaming_adapter_microchip/hls_outpu
 if {[info exists ::env(LIBERO_INSTALL_DIR)]} {
     set libero_dir $::env(LIBERO_INSTALL_DIR)
 } else {
-    set libero_dir "/media/fpgadev/Dev_Tools/Microchip/Libero_SoC"
+    # No LIBERO_INSTALL_DIR set: probe common Libero install roots (newest
+    # versioned install first), identified by the polarfire.v primitive
+    # source this script needs; the dev-box default is the last candidate.
+    set candidates {}
+    foreach pat {
+        /usr/local/microchip/*
+        /usr/local/microsemi/*
+        /opt/microchip/*
+        /opt/microsemi/*
+    } {
+        foreach d [lsort -decreasing [glob -nocomplain -type d $pat]] {
+            lappend candidates $d $d/Libero_SoC
+        }
+    }
+    lappend candidates "/media/fpgadev/Dev_Tools/Microchip_FPGA/2026.1/Libero_SoC"
+    set libero_dir [lindex $candidates end]
+    foreach d $candidates {
+        if {[file exists "$d/Designer/lib/vlog/polarfire.v"]} {
+            set libero_dir $d
+            break
+        }
+    }
 }
 set pf_prims "$libero_dir/Designer/lib/vlog/polarfire.v"
 if {![file exists $pf_prims]} {
-    error "PolarFire primitive models not found: $pf_prims (set LIBERO_INSTALL_DIR)"
+    error "PolarFire primitive models not found: $pf_prims (set LIBERO_INSTALL_DIR to the Libero_SoC dir containing Designer/lib/vlog/polarfire.v)"
 }
 
 puts "=========================================="
